@@ -24,6 +24,13 @@
       <div id="dq-details" style="display:none;margin-top:8px;"></div>
     </div>
 
+    <!-- Portfolio filter tabs -->
+    <div class="segment-tabs">
+      <button class="seg-btn active" data-seg="all">All</button>
+      <button class="seg-btn" data-seg="EQ">Equities</button>
+      <button class="seg-btn" data-seg="MF">Mutual Funds</button>
+    </div>
+
     <!-- Summary cards -->
     <section id="summary-cards" class="cards"></section>
 
@@ -101,7 +108,8 @@
           <table id="holdings-table">
             <thead>
               <tr>
-                <th class="sortable" data-col="symbol">Symbol <span class="sort-icon"></span></th>
+                <th class="sortable" data-col="display_name" id="th-symbol">Symbol <span class="sort-icon"></span></th>
+                <th id="th-folio" style="display:none">Folio</th>
                 <th>Type</th>
                 <th class="num sortable" data-col="quantity">Qty <span class="sort-icon"></span></th>
                 <th class="num sortable" data-col="avg_cost">Avg Cost <span class="sort-icon"></span></th>
@@ -170,8 +178,12 @@
         <h2>Transactions</h2>
         <div class="actions">
           <label class="btn-like">
-            Import CSV/XLSX
+            Import Tradebook (CSV/XLSX)
             <input id="import-input" type="file" accept=".csv,.xlsx,.xls" hidden />
+          </label>
+          <label class="btn-like mf-import-btn" title="Import CAMS/KFintech Consolidated Account Statement PDF">
+            Import CAS PDF (MF)
+            <input id="import-cas-input" type="file" accept=".pdf" hidden />
           </label>
           <a class="btn-like" href="/api/transactions.csv">Export CSV</a>
           <button id="btn-add">+ Add transaction</button>

@@ -1,26 +1,64 @@
 # Portfolio Tracker
 
-Self-hosted portfolio dashboard for Indian stocks (NSE/BSE) and mutual funds, with XIRR and benchmark comparison vs NIFTY 50, NIFTY 500, NIFTY Midcap 150, and NIFTY Smallcap 250.
+Self-hosted personal finance dashboard for Indian equities (NSE/BSE) and mutual funds. Tracks XIRR, compares against NIFTY benchmarks, handles corporate actions, and gives FY-wise realized P&L with STCG/LTCG split.
+
+---
 
 ## Features
 
-- One-click import of Zerodha tradebook (CSV/XLSX) with `trade_id`-based dedupe
-- Manual buy/sell entry, edit, delete
-- Live prices: yfinance for stocks, AMFI + mfapi.in for mutual funds
-- Holdings table: qty, avg cost, current price, P&L, % return, XIRR per holding
-- Portfolio XIRR vs benchmark XIRR (apples-to-apples cashflow replay)
-- Equity curve chart: portfolio vs each index, rebased to 100 at first transaction
-- CSV export of all transactions
-- SQLite storage (single-file, no external DB)
+### Equity (Stocks)
+- **Zerodha tradebook import** — CSV/XLSX, auto-detects separators, dedupes by `trade_id`
+- **Corporate actions** — splits, bonuses, demergers, dividends; auto-sync from yfinance; fractional share payouts tracked
+- **Symbol renames** — built-in map (ZOMATO→ETERNAL, GOLDETFADD→GOLDADD) + user-defined aliases
+- **Orphan sell detector** — flags IPO allotment sells with no matching buy (common for BAJAJHFL, TATATECH, etc.)
+- **Live prices** — yfinance for NSE/BSE; `.BO` fallback; AMFI NAV fallback for ETFs yfinance can't find
+
+### Mutual Funds
+- **CAMS + KFintech Combined CAS PDF import** — full history from folio inception; handles SIP, lumpsum, switch-in/out, redemption; skips stamp duty lines automatically
+- **Live NAV** — AMFI NAVAll.txt + mfapi.in historical NAV; cached daily
+- Full scheme name display (e.g. "Parag Parikh Flexi Cap Fund - Regular Plan Growth") with folio number
+
+### Analytics
+- **Holdings table** — qty/units, avg cost, current price/NAV, invested, current value, P&L, % return, XIRR per holding; sortable by any column
+- **Portfolio XIRR** — correct benchmark comparison: same rupees, same dates, replayed into the index. Index sell proceeds use the index's actual value (not the stock's windfall price)
+- **XIRR by period** — All-time | 1Y | 3Y | 5Y | Current FY | last 4 FYs | Custom. Correct subperiod XIRR using opening/closing portfolio values as cashflows
+- **Realized P&L by period** — same period selector; STCG (< 12 months, taxed at 20%) and LTCG (≥ 12 months, 12.5% above ₹1.25L) split for Indian tax planning
+- **Equity curve** — portfolio vs NIFTY 50 / NIFTY 500 / NIFTY Midcap 150 / NIFTY Smallcap 250; all rebased to 100 at first transaction date on the same cash-deployment schedule
+- **Data quality warnings** — surfaces orphan sells (likely IPO allotments) with total missing proceeds
+
+### Portfolio filter
+- **All | Equities | Mutual Funds** tabs — every panel (summary cards, XIRR analysis, realized P&L, equity curve, holdings) responds to the filter in real time
+
+### UI
+- Sticky header, collapsible sections (state saved in localStorage)
+- Holdings quick-filter (type symbol to instantly search)
+- Indian number formatting (₹1.52L, ₹10.5Cr)
+- Keyboard shortcuts: `N` = Add transaction, `R` = Refresh prices, `/` = Focus filter
+- Benchmarks in XIRR cards show `+X% vs index` delta
+
+---
+
+## Tech stack
+
+| Layer | Choice |
+|---|---|
+| Backend | FastAPI + SQLAlchemy + SQLite |
+| Price data | yfinance (equities), AMFI NAVAll.txt + mfapi.in (MFs) |
+| XIRR | scipy.optimize.brentq with Newton-Raphson fallback |
+| Frontend | Vanilla JS + Chart.js (no build step) |
+| Deployment | Docker + docker-compose; nginx reverse proxy for VPS |
+
+---
 
 ## Run locally
 
 ```bash
 cd portfolio-tracker
 python -m venv .venv
-# Windows:
+
+# Windows
 .venv\Scripts\activate
-# macOS/Linux:
+# macOS/Linux
 source .venv/bin/activate
 
 pip install -r requirements.txt
@@ -35,11 +73,9 @@ Open http://localhost:8000.
 docker compose up -d --build
 ```
 
-The SQLite database lives in `./data/portfolio.db` and is mounted into the container so it persists across rebuilds.
+`./data/portfolio.db` is mounted into the container — persists across rebuilds.
 
 ## VPS deployment with HTTPS (nginx + certbot)
-
-Once `docker compose up -d` is running on your VPS, put nginx in front for TLS:
 
 ```nginx
 server {
@@ -51,44 +87,113 @@ server {
 
     location / {
         proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```
 
-There is no built-in auth — run it behind a VPN, or add an nginx `auth_basic` block, or front it with something like Authelia.
+No built-in auth — run behind a VPN, `nginx auth_basic`, or Authelia.
 
-## Importing your tradebook
+---
 
-The importer expects Zerodha's standard column layout:
+## Importing data
 
+### Zerodha tradebook (equities)
+
+Expected column layout (auto-detected, case/separator-insensitive):
 ```
 symbol, isin, trade_date, exchange, segment, series, trade_type,
 auction, quantity, price, trade_id, order_id, order_execution_time
 ```
+- `segment = EQ` for stocks, `MF` for MFs bought via Zerodha
+- Re-import is safe — deduped by `trade_id`
 
-`segment` is `EQ` for equities and `MF` for mutual funds; `trade_type` is `buy` or `sell`. ISIN is what links mutual funds to the AMFI scheme code (and therefore to NAV history) — keep it populated.
+### CAMS + KFintech Combined CAS (mutual funds)
 
-Re-importing the same file is safe: rows are deduped by `trade_id`.
+1. Download your Combined CAS from **camsonline.com** or **kfintech.com** (Detailed, Since Inception)
+2. If password-protected: open in Acrobat/Chrome and save a password-free copy
+3. Click **Import CAS PDF (MF)** in the Transactions section
 
-## How XIRR is computed
+The importer handles all transaction types: Purchase, SIP, Switch-in/out, Redemption; skips stamp duty (0.005%) lines automatically. Re-import is safe — deduped by `CAS|folio|date|nav|units`.
 
-- **Per holding**: cashflows = each buy (negative `qty*price + fees`), each sell (positive, net of fees), plus today's market value of remaining quantity.
-- **Portfolio**: same construction over all transactions.
-- **Benchmark**: each transaction is replayed into the index — on a buy date, "buy" `cash_amount / index_close_that_day` units; on a sell, sell proportionally. End with `units × today's index close`. XIRR over those simulated cashflows. This is the apples-to-apples comparison vs your actual XIRR over the exact same date range and contribution timing.
+### IPO allotments (equities)
 
-XIRR uses `scipy.optimize.brentq` over `[-99%, 10000%]`, with a Newton-Raphson fallback.
+IPO allotments don't appear as buy transactions in Zerodha's tradebook. The dashboard detects "orphan sells" (sells with no matching buy) and shows a warning. Fix: add a manual buy transaction at the IPO issue price.
 
-## Refreshing prices
+---
 
-Prices are cached daily in the `price_cache` table. The "Refresh prices" button forces a recompute (which lazily refetches today's closes for all held instruments + benchmarks). For background refresh, schedule a cron hitting `POST /api/refresh-prices`.
+## Corporate actions
 
-## Caveats / out of scope (v0.1)
+The **Sync from yfinance** button fetches splits and dividends for all held equities automatically.
 
-- Corporate actions (splits, bonuses, MF dividends) are not modelled. yfinance returns split-adjusted close, so equity XIRR is reasonable; MF dividend reinvestment isn't tracked separately.
-- INR only.
-- No auth (run behind a VPN or reverse-proxy auth).
-- No tax/capital-gains report.
+For demergers (e.g. ITC → ITC Hotels), add manually via **Corporate Actions → Add manually**:
+- Type: `Demerger`
+- Ratio: fraction of cost **retained** in the parent (e.g. `0.8649` for ITC after Hotels spin-off)
+- The demerged child shares should be added as a manual buy transaction at the SEBI-allocated cost
+
+For bonus issues (e.g. 1:1 bonus = ratio `2.0`), switch-outs that create fractional shares floor to integer and the fractional cash payout is tracked in XIRR.
+
+---
+
+## XIRR explained
+
+**Per holding:** buy outflows (qty × price + fees) + sell inflows + today's market value of remaining qty.
+
+**Portfolio:** same, plus dividend inflows from corporate actions data.
+
+**Benchmark:** replay the identical rupee amounts on the identical dates into the index. On each stock sell, sell the proportional index position at the index's actual value — not the stock's price. This prevents IPO windfalls from artificially inflating the benchmark XIRR.
+
+**Subperiod XIRR** (e.g. FY2024-25):
+- Opening portfolio value on Apr 1 2024 → negative cashflow (carry-in)
+- All transactions Apr 2024 – Mar 2025 → cashflows
+- Closing portfolio value on Mar 31 2025 → positive cashflow
+- XIRR isolates that year without distortion from earlier or later periods.
+
+XIRR solver: `scipy.optimize.brentq([-99%, 10000%])` with Newton-Raphson fallback.
+
+---
+
+## Realized P&L and taxes
+
+The **Realized P&L** panel uses FIFO to attribute holding period per lot:
+- **STCG** (held < 12 months): taxed at 20%
+- **LTCG** (held ≥ 12 months): ₹1.25L exempt, 12.5% above that
+
+Filter by Current FY, Previous FY, or any date range to match what you'd report in ITR.
+
+---
+
+## Prices and NAV
+
+| Asset | Source | Cache |
+|---|---|---|
+| Equities (NSE) | yfinance `.NS` | Daily, `price_cache` table |
+| Equities (BSE fallback) | yfinance `.BO` | Daily |
+| ETFs (yfinance-unavailable) | AMFI NAVAll.txt + mfapi.in | Daily |
+| Mutual fund NAV (historical) | mfapi.in JSON | On first fetch |
+| Benchmark indices | yfinance `^NSEI`, `^CRSLDX`, ETF proxies | Daily |
+
+The **Refresh prices** button force-fetches today's closes for all held instruments.
+
+---
+
+## Keyboard shortcuts
+
+| Key | Action |
+|---|---|
+| `N` | Open Add Transaction dialog |
+| `R` | Refresh prices |
+| `/` | Focus holdings filter |
+
+---
+
+## Known limitations
+
+- No auth — run behind a VPN or reverse-proxy auth layer
+- INR only; no multi-currency support
+- Mutual fund dividend reinvestment is captured from the CAS (appears as a buy transaction); separate dividend payouts are not yet tracked as cashflows
+- No tax reports or capital-gains schedules (use the Realized P&L panel as a starting point)
+- Corporate actions for MFs (bonus units, fund mergers) must be entered manually if not in Zerodha's tradebook

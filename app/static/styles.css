@@ -223,6 +223,31 @@ dialog input, dialog select {
   color: var(--text);
 }
 
+/* ---- portfolio segment tabs ---- */
+.segment-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.seg-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 6px 16px;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.15s;
+}
+.seg-btn:hover { color: var(--text); border-color: #444c56; background: transparent; }
+.seg-btn.active {
+  background: var(--accent);
+  color: #0d1117;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.mf-import-btn { color: var(--text); }
+
 .dq-banner {
   background: rgba(248,81,73,.12);
   border: 1px solid rgba(248,81,73,.4);

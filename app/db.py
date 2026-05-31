@@ -12,6 +12,8 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     create_engine,
+    inspect,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
@@ -47,6 +49,7 @@ class Transaction(Base):
     notes = Column(String, nullable=True)
     source = Column(String, nullable=False, default="manual")  # 'import' | 'manual'
     trade_id = Column(String, nullable=True)
+    folio = Column(String, nullable=True)   # MF folio number (from CAS import)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (UniqueConstraint("trade_id", name="uq_trade_id"),)
@@ -95,6 +98,13 @@ class CorporateAction(Base):
 
 def init_db() -> None:
     Base.metadata.create_all(engine)
+    # One-time migration: add folio column if not yet present
+    insp = inspect(engine)
+    existing_cols = {c["name"] for c in insp.get_columns("transactions")}
+    if "folio" not in existing_cols:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE transactions ADD COLUMN folio TEXT"))
+            conn.commit()
 
 
 def get_session():

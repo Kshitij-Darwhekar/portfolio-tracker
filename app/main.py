@@ -24,6 +24,7 @@ from .analytics import (
 from .corporate_actions import auto_fetch_all
 from .db import CorporateAction, Transaction, get_session, init_db
 from .importer import import_tradebook
+from .mf_importer import import_cas_pdf
 from .prices import BENCHMARKS, add_symbol_alias, list_symbol_aliases, remove_symbol_alias
 from .xirr import xirr
 
@@ -165,26 +166,54 @@ async def import_file(file: UploadFile = File(...), db: Session = Depends(get_se
     return JSONResponse(result)
 
 
+@app.post("/api/import-cas")
+async def import_cas(file: UploadFile = File(...), db: Session = Depends(get_session)):
+    """Import a CAMS+KFintech Combined CAS PDF (Consolidated Account Statement).
+
+    The PDF must be unlocked/unencrypted. If your CAS is password-protected,
+    open it in a PDF viewer and save a copy without a password first.
+    """
+    content = await file.read()
+    # Write to a temp file since PyMuPDF needs a file path
+    import tempfile, os
+    suffix = ".pdf"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+    try:
+        result = import_cas_pdf(db, tmp_path)
+    finally:
+        os.unlink(tmp_path)
+    return JSONResponse(result)
+
+
 # --- analytics ---
 
 @app.get("/api/holdings")
-def holdings(db: Session = Depends(get_session)):
-    rows = compute_holdings(db)
+def holdings(
+    segment: str | None = Query(None, description="EQ | MF | None for all"),
+    db: Session = Depends(get_session),
+):
+    rows = compute_holdings(db, segment=segment or None)
     return [r.__dict__ for r in rows]
 
 
 @app.get("/api/summary")
-def summary(db: Session = Depends(get_session)):
-    return compute_summary(db)
+def summary(
+    segment: str | None = Query(None),
+    db: Session = Depends(get_session),
+):
+    return compute_summary(db, segment=segment or None)
 
 
 @app.get("/api/equity-curve")
 def equity_curve(
     benchmarks: str | None = Query(None, description="Comma-separated tickers"),
+    segment: str | None = Query(None),
     db: Session = Depends(get_session),
 ):
     bench_list = [b.strip() for b in benchmarks.split(",") if b.strip()] if benchmarks else None
-    return compute_equity_curve(db, bench_list)
+    return compute_equity_curve(db, bench_list, segment=segment or None)
 
 
 @app.get("/api/benchmarks")
@@ -204,6 +233,7 @@ def xirr_analysis(
     period: str | None = Query(None),
     from_date: date | None = Query(None),
     to_date: date | None = Query(None),
+    segment: str | None = Query(None),
     db: Session = Depends(get_session),
 ):
     """Portfolio + benchmark XIRR for a specific period.
@@ -227,7 +257,7 @@ def xirr_analysis(
         y = int(period[3:])
         from_date, to_date = date(y, 4, 1), date(y + 1, 3, 31)
     # period == "all" or None → from_date stays None
-    return compute_period_xirr(db, from_date, to_date)
+    return compute_period_xirr(db, from_date, to_date, segment=segment or None)
 
 
 @app.get("/api/realized-pnl")
@@ -235,6 +265,7 @@ def realized_pnl(
     period: str | None = Query(None, description="current_fy | prev_fy | current_cy | all"),
     from_date: date | None = Query(None),
     to_date: date | None = Query(None),
+    segment: str | None = Query(None),
     db: Session = Depends(get_session),
 ):
     """Realized P&L for sells within a period, with STCG/LTCG split.
@@ -255,7 +286,7 @@ def realized_pnl(
         from_date = date(today.year, 1, 1)
         to_date = today
     # if period == "all" or None, from_date/to_date stay as None → all-time
-    return compute_realized_pnl_by_period(db, from_date, to_date)
+    return compute_realized_pnl_by_period(db, from_date, to_date, segment=segment or None)
 
 
 @app.get("/api/data-quality")

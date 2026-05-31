@@ -34,7 +34,9 @@ from .xirr import xirr
 class HoldingRow:
     isin: str | None
     symbol: str
+    display_name: str     # scheme name for MF (from instruments.name), symbol for EQ
     segment: str
+    folio: str | None     # MF folio number (None for equities)
     quantity: float
     avg_cost: float       # weighted avg cost across remaining lots
     invested: float       # qty * avg_cost
@@ -98,9 +100,12 @@ def _per_holding_xirr(
     return xirr(flows)
 
 
-def compute_holdings(db: Session, today: date | None = None) -> list[HoldingRow]:
+def compute_holdings(db: Session, today: date | None = None, segment: str | None = None) -> list[HoldingRow]:
     today = today or date.today()
-    txns = db.execute(select(Transaction)).scalars().all()
+    q = select(Transaction)
+    if segment:
+        q = q.where(Transaction.segment == segment)
+    txns = db.execute(q).scalars().all()
     bucket = _txns_by_isin(txns)
 
     rows: list[HoldingRow] = []
@@ -135,11 +140,20 @@ def compute_holdings(db: Session, today: date | None = None) -> list[HoldingRow]
         frac_flows = [(today, frac_cash)] if frac_cash > 0 else []
         x = _per_holding_xirr(group, cur_value, today, div_flows + frac_flows) if (qty > 0 or any(t.trade_type == "sell" for t in group)) else None
 
+        # For MF: display the full scheme name from instruments; for EQ: use symbol
+        best_folio = next((t.folio for t in group if t.folio), None)
+        display_name = (
+            inst.name if inst and inst.name and first.segment == "MF"
+            else first.symbol
+        )
+
         rows.append(
             HoldingRow(
                 isin=first.isin,
                 symbol=first.symbol,
+                display_name=display_name,
                 segment=first.segment,
+                folio=best_folio,
                 quantity=qty,
                 avg_cost=avg,
                 invested=qty * avg,
@@ -196,6 +210,7 @@ def compute_period_xirr(
     db: Session,
     from_date: date | None = None,
     to_date: date | None = None,
+    segment: str | None = None,
 ) -> dict:
     """XIRR for portfolio + all benchmarks over a specific period.
 
@@ -208,9 +223,10 @@ def compute_period_xirr(
     When from_date is None: standard all-time XIRR (original behaviour).
     """
     today = to_date or date.today()
-    all_txns = db.execute(
-        select(Transaction).order_by(Transaction.trade_date, Transaction.id)
-    ).scalars().all()
+    q = select(Transaction).order_by(Transaction.trade_date, Transaction.id)
+    if segment:
+        q = q.where(Transaction.segment == segment)
+    all_txns = db.execute(q).scalars().all()
 
     if not all_txns:
         return {"portfolio_xirr": None, "benchmarks": {}, "period_label": "no data"}
@@ -220,7 +236,7 @@ def compute_period_xirr(
     if from_date is None or from_date <= first_txn_date:
         # All-time: use standard portfolio cashflows + current terminal value
         flows = portfolio_cashflows(db, all_txns)
-        holdings = compute_holdings(db, today)
+        holdings = compute_holdings(db, today, segment=segment)
         current_value = sum(h.current_value or 0 for h in holdings)
         if current_value > 0:
             flows.append((today, current_value))
@@ -391,6 +407,7 @@ def compute_realized_pnl_by_period(
     db: Session,
     from_date: date | None = None,
     to_date: date | None = None,
+    segment: str | None = None,
 ) -> dict:
     """Realized P&L for sells whose trade_date falls within [from_date, to_date].
 
@@ -403,9 +420,10 @@ def compute_realized_pnl_by_period(
     Cost basis is always derived from the full transaction history — we don't
     artificially restrict which buys are visible. Only the SELLS are filtered.
     """
-    txns = db.execute(
-        select(Transaction).order_by(Transaction.trade_date, Transaction.id)
-    ).scalars().all()
+    q = select(Transaction).order_by(Transaction.trade_date, Transaction.id)
+    if segment:
+        q = q.where(Transaction.segment == segment)
+    txns = db.execute(q).scalars().all()
     bucket = _txns_by_isin(txns)
 
     total_realized = 0.0
@@ -544,16 +562,19 @@ def portfolio_cashflows(db: Session, txns: list[Transaction]) -> list[tuple[date
     return flows
 
 
-def compute_summary(db: Session, today: date | None = None) -> dict:
+def compute_summary(db: Session, today: date | None = None, segment: str | None = None) -> dict:
     today = today or date.today()
-    holdings = compute_holdings(db, today)
+    holdings = compute_holdings(db, today, segment=segment)
     invested = sum(h.invested for h in holdings)
     current_value = sum(h.current_value or 0 for h in holdings)
     realized = sum(h.realized_pnl for h in holdings)
     unrealized = current_value - invested if invested else 0
     total_pnl = realized + unrealized
 
-    txns = db.execute(select(Transaction)).scalars().all()
+    q = select(Transaction)
+    if segment:
+        q = q.where(Transaction.segment == segment)
+    txns = db.execute(q).scalars().all()
     flows = portfolio_cashflows(db, txns)
     if current_value > 0:
         flows.append((today, current_value))
@@ -626,10 +647,16 @@ def compute_summary(db: Session, today: date | None = None) -> dict:
 # ---------- equity curve ----------
 
 def compute_equity_curve(
-    db: Session, benchmarks: list[str] | None = None, today: date | None = None
+    db: Session,
+    benchmarks: list[str] | None = None,
+    today: date | None = None,
+    segment: str | None = None,
 ) -> dict:
     today = today or date.today()
-    txns = db.execute(select(Transaction)).scalars().all()
+    q = select(Transaction)
+    if segment:
+        q = q.where(Transaction.segment == segment)
+    txns = db.execute(q).scalars().all()
     if not txns:
         return {"dates": [], "series": {}}
 

@@ -20,6 +20,35 @@ function escapeHtml(s) {
 
 let chart = null;
 
+// ---- segment filter (All | Equities | Mutual Funds) ----
+let activeSegment = "all";  // "all" | "EQ" | "MF"
+
+function segParam() {
+  return activeSegment === "all" ? "" : `?segment=${activeSegment}`;
+}
+function segQS(existing = "") {
+  if (activeSegment === "all") return existing;
+  const sep = existing.includes("?") ? "&" : "?";
+  return existing + sep + `segment=${activeSegment}`;
+}
+
+document.querySelectorAll(".seg-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".seg-btn").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    activeSegment = btn.dataset.seg;
+
+    // Show/hide folio column in holdings table based on segment
+    const folioTh = document.getElementById("th-folio");
+    const symTh   = document.getElementById("th-symbol");
+    if (folioTh) folioTh.style.display = activeSegment === "MF" ? "" : "none";
+    if (symTh)   symTh.textContent     = activeSegment === "MF" ? "Scheme" : "Symbol";
+
+    // Refresh everything with the new segment
+    refreshAll();
+  });
+});
+
 // ---- collapsible sections ----
 // State stored in localStorage so preferences survive refresh.
 // HTML marks open sections with ▲ button and collapsed ones with ▼.
@@ -98,8 +127,8 @@ async function loadXirrAnalysis(period = "all", fromDate = null, toDate = null) 
   customDiv.style.display = "none";
   content.innerHTML = `<div class="muted small">Loading…</div>`;
 
-  let url = `/api/xirr-analysis?period=${period}`;
-  if (fromDate) url = `/api/xirr-analysis?from_date=${fromDate}&to_date=${toDate || ""}`;
+  let url = segQS(`/api/xirr-analysis?period=${period}`);
+  if (fromDate) url = segQS(`/api/xirr-analysis?from_date=${fromDate}&to_date=${toDate || ""}`);
 
   try {
     const r = await api(url);
@@ -219,7 +248,7 @@ async function loadRealizedPnl(period = "all") {
   content.innerHTML = `<div class="muted small">Loading…</div>`;
 
   // Map fy_YYYY values to from/to query params
-  let url = `/api/realized-pnl?period=${period}`;
+  let url = segQS(`/api/realized-pnl?period=${period}`);
   if (period.startsWith("fy_")) {
     const y = parseInt(period.slice(3));
     url = `/api/realized-pnl?from_date=${y}-04-01&to_date=${y+1}-03-31`;
@@ -272,7 +301,7 @@ document.getElementById("custom-apply").addEventListener("click", async () => {
 });
 
 async function loadSummary() {
-  const s = await api("/api/summary");
+  const s = await api(`/api/summary${segParam()}`);
   document.getElementById("as-of").textContent = "As of " + s.as_of;
 
   const cards = document.getElementById("summary-cards");
@@ -358,9 +387,16 @@ function renderHoldings() {
     if (!hideClosed && (r.quantity || 0) <= 0 && (r.realized_pnl || 0) === 0) continue;
     if (holdingsFilterText && !r.symbol.toUpperCase().includes(holdingsFilterText)) continue;
     const pnl = (r.unrealized_pnl ?? 0) + (r.realized_pnl ?? 0);
+    const nameCell = activeSegment === "MF"
+      ? `<td><div style="font-size:12px;max-width:220px;white-space:normal;line-height:1.4">${r.display_name || r.symbol}</div></td>`
+      : `<td>${r.display_name || r.symbol}</td>`;
+    const folioCell = activeSegment === "MF"
+      ? `<td class="muted" style="font-size:11px">${r.folio || "—"}</td>` : "";
+
     tbody.innerHTML += `
       <tr>
-        <td>${r.symbol}</td>
+        ${nameCell}
+        ${folioCell}
         <td>${r.segment}</td>
         <td class="num">${fmtQty(r.quantity)}</td>
         <td class="num">${fmtINR(r.avg_cost)}</td>
@@ -386,7 +422,7 @@ document.querySelectorAll("#holdings-table th.sortable").forEach((th) => {
 document.getElementById("hide-closed").addEventListener("change", renderHoldings);
 
 async function loadHoldings() {
-  holdingsData = await api("/api/holdings");
+  holdingsData = await api(`/api/holdings${segParam()}`);
   renderHoldings();
 }
 
@@ -414,7 +450,7 @@ async function loadTransactions() {
 }
 
 async function loadEquityCurve() {
-  const data = await api("/api/equity-curve");
+  const data = await api(segQS("/api/equity-curve"));
   if (data.base_date) {
     document.getElementById("curve-subtitle").textContent =
       `All series rebased to 100 on ${data.base_date} (your first transaction). ` +
@@ -458,7 +494,28 @@ async function loadEquityCurve() {
   });
 }
 
-// --- import ---
+// --- CAS PDF import (Mutual Funds) ---
+
+document.getElementById("import-cas-input").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append("file", file);
+  const result = document.getElementById("import-result");
+  result.innerHTML = "Importing CAS PDF…";
+  try {
+    const r = await api("/api/import-cas", { method: "POST", body: fd });
+    let msg = `CAS import: ${r.inserted} new transactions, ${r.skipped_duplicates} duplicates, ${r.schemes_found} schemes.`;
+    if (r.errors && r.errors.length) msg += ` ${r.errors.length} error(s).`;
+    result.innerHTML = msg;
+    e.target.value = "";
+    await refreshAll();
+  } catch (err) {
+    result.innerHTML = `<span class="neg">CAS import failed: ${escapeHtml(err.message)}</span>`;
+  }
+});
+
+// --- Tradebook import (Equities) ---
 
 document.getElementById("import-input").addEventListener("change", async (e) => {
   const file = e.target.files[0];
