@@ -7,6 +7,7 @@
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
   <link rel="stylesheet" href="/static/styles.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
 </head>
 <body>
   <header>
@@ -31,7 +32,42 @@
       <button class="seg-btn" data-seg="EQ">Equities</button>
       <button class="seg-btn" data-seg="MF">Mutual Funds</button>
       <button class="seg-btn" data-seg="FI">Fixed Income</button>
+      <button class="seg-btn" data-seg="EPF">EPF</button>
+      <button class="seg-btn" data-seg="GLOBAL">Global</button>
+      <button class="seg-btn" data-seg="BONDS">Bonds</button>
     </div>
+
+    <!-- Net Worth banner — shown on All tab only -->
+    <section id="nw-banner" class="card nw-banner" style="display:none">
+      <div class="nw-header">
+        <div>
+          <div class="nw-label">Total Net Worth</div>
+          <div class="nw-total" id="nw-total">—</div>
+          <div class="muted small" id="nw-asof"></div>
+          <!-- View toggle -->
+          <div style="margin-top:10px;display:flex;gap:6px">
+            <button class="nw-view-btn active" data-view="account">By Account</button>
+            <button class="nw-view-btn" data-view="asset_class">By Asset Class</button>
+            <button class="nw-view-btn" data-view="edit" style="margin-left:8px;color:var(--accent);background:transparent;border-color:var(--accent)">Edit categories</button>
+          </div>
+        </div>
+        <canvas id="nw-donut" width="140" height="140"></canvas>
+      </div>
+      <div id="nw-alloc-strip" class="nw-alloc-strip"></div>
+    </section>
+
+    <!-- Net Worth projection chart — shown on All tab only -->
+    <section class="card collapsible" data-section="nw-chart" id="nw-chart-section" style="display:none">
+      <div class="section-header row-between">
+        <h2>Net Worth Journey <span class="muted small" id="nw-assumptions"></span></h2>
+        <button class="collapse-btn" data-target="nw-chart">▲</button>
+      </div>
+      <div class="section-body" id="body-nw-chart">
+        <div style="position:relative;height:300px">
+          <canvas id="nw-projection-chart"></canvas>
+        </div>
+      </div>
+    </section>
 
     <!-- Summary cards -->
     <section id="summary-cards" class="cards"></section>
@@ -88,6 +124,225 @@
       <div class="section-body" id="body-chart">
         <div class="chart-container">
           <canvas id="equity-chart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bonds section — shown only when Bonds tab is active -->
+    <section class="card" id="bonds-section" style="display:none">
+      <div class="row-between" style="margin-bottom:12px">
+        <h2>Bonds <span class="muted small">SGB · Corporate · G-Sec</span></h2>
+        <button id="btn-bond-add">+ Add bond details</button>
+      </div>
+      <div id="bonds-content"></div>
+    </section>
+
+    <!-- Bond details add/edit modal -->
+    <dialog id="bond-dialog">
+      <form id="bond-form" method="dialog">
+        <h3 id="bond-form-title">Add Bond Details</h3>
+        <div class="muted small" style="margin-bottom:10px">
+          The buy/sell transactions are already in your equity tradebook.
+          This stores the bond-specific metadata (coupon, maturity, tax treatment).
+        </div>
+        <div class="grid2">
+          <label>NSE Symbol<input type="text" name="symbol" required placeholder="SGBDEC31III" style="text-transform:uppercase" /></label>
+          <label>Bond Type
+            <select name="bond_type">
+              <option value="SGB">Sovereign Gold Bond (SGB)</option>
+              <option value="corporate">Corporate Bond</option>
+              <option value="g-sec">Government Security (G-Sec)</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+        </div>
+        <label>Full Name<input type="text" name="full_name" placeholder="SGB 2023-24 Series III" /></label>
+        <label>ISIN<input type="text" name="isin" placeholder="IN0020230182" /></label>
+        <div class="grid2">
+          <label>Issue Price (₹)<input type="number" name="issue_price" step="any" min="1" required /></label>
+          <label>Coupon Rate (% p.a.)<input type="number" name="coupon_rate" step="0.01" min="0" value="2.5" /></label>
+        </div>
+        <div class="grid2">
+          <label>Issue Date<input type="date" name="issue_date" required /></label>
+          <label>Maturity Date<input type="date" name="maturity_date" required /></label>
+        </div>
+        <label>Coupon Frequency
+          <select name="coupon_frequency">
+            <option value="semi-annual">Semi-annual (every 6 months)</option>
+            <option value="annual">Annual</option>
+            <option value="quarterly">Quarterly</option>
+          </select>
+        </label>
+        <div class="grid2">
+          <label>Units held<input type="number" name="quantity" step="any" min="0" value="0" required /></label>
+          <label>Your purchase price (₹) <span class="muted small">leave blank = issue price</span>
+            <input type="number" name="purchase_price" step="any" min="0" placeholder="same as issue price" />
+          </label>
+        </div>
+        <label>Purchase date<input type="date" name="purchase_date" /></label>
+        <label>Current price override (₹) <span class="muted small">optional — set this if the auto-fetch is wrong (e.g. paste from NSE/RBI)</span>
+          <input type="number" name="price_override" step="any" min="0" placeholder="leave blank to use gold proxy" />
+        </label>
+        <label class="toggle-label" style="flex-direction:row;gap:8px;align-items:center;">
+          <input type="checkbox" name="capital_gains_exempt_at_maturity" />
+          Capital gains at maturity are tax-exempt (SGBs redeemed via RBI)
+        </label>
+        <label>Notes<input type="text" name="notes" /></label>
+        <div class="actions right">
+          <button type="button" id="bond-cancel">Cancel</button>
+          <button type="submit">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Global Equities section — shown only when Global tab is active -->
+    <section class="card" id="global-section" style="display:none">
+      <div class="row-between" style="margin-bottom:12px">
+        <h2>Global Equities <span class="muted small" id="global-usdinr"></span></h2>
+        <div class="actions">
+          <label class="btn-like" title="Import INDMoney Global Equity Full Report (XLS/XLSX)">
+            Import INDMoney XLS
+            <input id="import-global-input" type="file" accept=".xls,.xlsx,.csv" hidden />
+          </label>
+          <button id="btn-global-add">+ Add manually</button>
+        </div>
+      </div>
+      <div id="global-import-status" style="display:none;margin-bottom:10px">
+        <div id="global-progress-bar" style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin-bottom:5px">
+          <div id="global-progress-fill" style="height:100%;width:0%;background:var(--accent);transition:width 0.3s;border-radius:2px"></div>
+        </div>
+        <div id="global-import-msg" class="small"></div>
+      </div>
+      <!-- Summary cards -->
+      <div id="global-summary-cards" class="cards" style="margin-bottom:14px"></div>
+      <!-- Holdings table -->
+      <div class="table-wrap">
+        <table id="global-holdings-table">
+          <thead>
+            <tr>
+              <th>Stock</th>
+              <th class="num">Qty</th>
+              <th class="num">Avg Cost (USD)</th>
+              <th class="num">Price (USD)</th>
+              <th class="num">Invested</th>
+              <th class="num">Current Value</th>
+              <th class="num">P&amp;L (USD)</th>
+              <th class="num">P&amp;L (INR)</th>
+              <th class="num">% Return</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <!-- XIRR Analysis -->
+      <div id="global-xirr-section" style="margin-top:18px;display:none">
+        <h3 style="font-size:13px;font-weight:600;margin:0 0 10px">XIRR vs US Benchmarks <span class="muted small">(USD)</span></h3>
+        <div id="global-xirr-cards" class="xirr-grid"></div>
+      </div>
+
+      <!-- Equity Curve -->
+      <div id="global-curve-section" style="margin-top:18px;display:none">
+        <h3 style="font-size:13px;font-weight:600;margin:0 0 8px">Equity Curve <span class="muted small" id="global-curve-subtitle"></span></h3>
+        <div style="position:relative;height:260px"><canvas id="global-curve-chart"></canvas></div>
+      </div>
+
+      <!-- Indian Tax Analysis -->
+      <div id="global-tax-section" style="margin-top:18px;display:none">
+        <h3 style="font-size:13px;font-weight:600;margin:0 0 8px">Indian Tax Analysis on Global Equity</h3>
+        <div id="global-tax-summary" class="cards" style="margin-bottom:12px"></div>
+        <div id="global-tax-note" class="muted small" style="margin-bottom:10px;line-height:1.5"></div>
+        <div class="table-wrap">
+          <table id="global-tax-table">
+            <thead>
+              <tr>
+                <th>Symbol</th><th>Buy Date</th><th>Sell Date</th>
+                <th class="num">Months Held</th><th>Type</th>
+                <th class="num">P&L (USD)</th>
+                <th class="num">Cost (INR)</th><th class="num">Proceeds (INR)</th>
+                <th class="num">P&L (INR)</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Transaction history (collapsible) -->
+      <details style="margin-top:16px">
+        <summary style="cursor:pointer;color:var(--muted);font-size:13px;user-select:none">Transaction History</summary>
+        <div class="table-wrap" style="margin-top:8px">
+          <table id="global-txn-table">
+            <thead>
+              <tr>
+                <th>Date</th><th>Stock</th><th>Type</th>
+                <th class="num">Qty</th><th class="num">Price (USD)</th>
+                <th class="num">Amount (USD)</th><th class="num">Fees (USD)</th>
+                <th class="num">USD/INR</th><th class="num">Amount (INR)</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+
+    <!-- EPF section — shown only when EPF tab is active -->
+    <section class="card epf-section" id="epf-section" style="display:none">
+      <div class="row-between" style="margin-bottom:12px">
+        <h2>EPF — Employee Provident Fund</h2>
+        <div class="actions">
+          <span class="muted small">Rate: <strong id="epf-rate-label">8.25% p.a.</strong></span>
+          <label class="btn-like" title="Import EPFO Member Passbook PDF">
+            Import Passbook PDF
+            <input id="epf-tab-import" type="file" accept=".pdf" hidden />
+          </label>
+        </div>
+      </div>
+      <!-- Import progress/result bar -->
+      <div id="epf-import-status" style="display:none;margin-bottom:12px">
+        <div id="epf-progress-bar" style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin-bottom:6px">
+          <div id="epf-progress-fill" style="height:100%;width:0%;background:var(--accent);transition:width 0.3s;border-radius:2px"></div>
+        </div>
+        <div id="epf-import-msg" class="small"></div>
+      </div>
+      <div id="epf-summary-cards" class="cards" style="margin-bottom:16px"></div>
+      <div class="fi-charts-grid">
+        <div class="fi-chart-box fi-chart-wide">
+          <h3>Monthly Contributions <span class="muted small">employee vs employer</span></h3>
+          <div style="position:relative;height:220px"><canvas id="epf-monthly-chart"></canvas></div>
+        </div>
+        <div class="fi-chart-box">
+          <h3>Interest Credited by Year</h3>
+          <div style="position:relative;height:200px"><canvas id="epf-interest-chart"></canvas></div>
+        </div>
+        <div class="fi-chart-box">
+          <h3>Balance Growth</h3>
+          <div style="position:relative;height:200px"><canvas id="epf-balance-chart"></canvas></div>
+        </div>
+      </div>
+
+      <!-- EPF Contribution Ledger -->
+      <div style="margin-top:16px">
+        <div class="row-between" style="margin-bottom:8px">
+          <h3 style="margin:0;font-size:14px">Contribution History</h3>
+          <span class="muted small" id="epf-entry-count"></span>
+        </div>
+        <div class="table-wrap">
+          <table id="epf-table">
+            <thead>
+              <tr>
+                <th>Month</th>
+                <th>Type</th>
+                <th class="num">Employee (₹)</th>
+                <th class="num">Employer (₹)</th>
+                <th class="num">Pension (EPS)</th>
+                <th class="num">Running Balance</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
         </div>
       </div>
     </section>
@@ -258,6 +513,10 @@
             Import CAS PDF (MF)
             <input id="import-cas-input" type="file" accept=".pdf" hidden />
           </label>
+          <label class="btn-like" title="Import EPFO Member Passbook PDF — only financial data is stored, no personal details">
+            Import EPF Passbook
+            <input id="import-epf-input" type="file" accept=".pdf" hidden />
+          </label>
           <a class="btn-like" href="/api/transactions.csv">Export CSV</a>
           <button id="btn-add">+ Add transaction</button>
           <button class="collapse-btn" data-target="txns">▼</button>
@@ -350,6 +609,56 @@
         <button type="submit">Save</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- Global equity manual entry modal -->
+  <dialog id="global-dialog">
+    <form id="global-form" method="dialog">
+      <h3>Add Global Equity Transaction</h3>
+      <input type="hidden" name="id" />
+      <div class="grid2">
+        <label>Ticker (US symbol)<input type="text" name="symbol" required placeholder="MSFT" style="text-transform:uppercase" /></label>
+        <label>Company name<input type="text" name="stock_name" placeholder="optional" /></label>
+      </div>
+      <div class="grid2">
+        <label>Date<input type="date" name="trade_date" required /></label>
+        <label>Type
+          <select name="trade_type" required>
+            <option value="buy">Buy</option>
+            <option value="sell">Sell</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid2">
+        <label>Quantity (fractional ok)<input type="number" name="quantity" step="any" min="0" required placeholder="0.5" /></label>
+        <label>Price per share (USD)<input type="number" name="price_usd" step="any" min="0" required placeholder="410.00" /></label>
+      </div>
+      <div class="grid2">
+        <label>Brokerage / fees (USD)<input type="number" name="fees_usd" step="any" min="0" value="0" /></label>
+        <label>USD/INR rate <span class="muted small">(leave blank to auto-fetch)</span>
+          <input type="number" name="exchange_rate" step="any" min="0" placeholder="auto" /></label>
+      </div>
+      <label>Notes<input type="text" name="notes" /></label>
+      <div class="actions right">
+        <button type="button" id="global-cancel">Cancel</button>
+        <button type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Asset category editor -->
+  <dialog id="cat-dialog" style="min-width:560px;max-height:80vh;overflow-y:auto">
+    <div class="row-between" style="margin-bottom:12px">
+      <h3 style="margin:0">Edit Asset Categories</h3>
+      <div class="actions">
+        <button id="cat-auto-btn" style="font-size:12px">Re-run auto-detect</button>
+        <button type="button" id="cat-close" style="font-size:12px">Close</button>
+      </div>
+    </div>
+    <div class="muted small" style="margin-bottom:10px">
+      Categories used in the Asset Class net worth view. Auto-detected from instrument names — override any that are wrong.
+    </div>
+    <div id="cat-table-wrap"></div>
   </dialog>
 
   <!-- Fixed Income add/edit modal -->

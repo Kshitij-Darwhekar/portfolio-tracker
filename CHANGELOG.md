@@ -5,6 +5,57 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.4.0] — 2026-06-01
+
+### Added
+- **EPF section** — EPFO Member Passbook PDF importer (CAMS+KFintech combined format)
+  - Handles both normal format (label / month / amounts) and reverse page-break format (amounts on one page, month code first line of next page)
+  - Strips PII: UAN, Member ID, Name, DOB, mobile never stored or logged
+  - Summary cards: total balance, employee vs employer split, EPS pension, this-FY contributions
+  - Three charts: monthly contributions (stacked bar), year-wise interest, balance growth curve
+  - Contribution ledger table with running balance
+  - Retirement projection coming from EPF tab
+- **Global Equities section** — INDMoney/Alpaca order book XLS importer
+  - Columns: Stock Name, Symbol, Execution Time, Transaction Type, Quantity (fractional), Price (USD), Amount (USD), Brokerage
+  - Auto-fetches historical USD/INR rates at each transaction date via yfinance
+  - Holdings table showing P&L in both USD and INR
+  - XIRR vs S&P 500 and NASDAQ 100 (same cashflow-replay method as Indian equity vs NIFTY)
+  - Equity curve: portfolio vs S&P 500 vs NASDAQ 100, rebased to 100
+  - **Indian tax analysis** with correct rules: STCG (< 24 months, slab rate) and LTCG (≥ 24 months, 12.5%, NO ₹1.25L exemption for foreign equity). Lot-by-lot breakdown with INR P&L using historical exchange rates
+  - Manual entry for future transactions not from INDMoney
+- **Bonds section** — self-contained (no equity tradebook entry needed)
+  - SGB (Sovereign Gold Bonds): priced via GOLDBEES × 100 gold proxy (live yfinance fetch); manual price override for NSE/RBI price
+  - Interest income: configurable coupon rate, semi-annual schedule, total earned, this-FY interest, next coupon date and amount, full 16-payment schedule
+  - **Tax treatment display**: SGB capital gains at RBI maturity = TAX EXEMPT (Section 47(viic) IT Act); interest taxable at slab rate
+  - SGBDE31III pre-seeded with correct NSE ticker, ISIN IN0020230168, issue price ₹6,149, 2.5% coupon, Dec 2031 maturity
+  - Supports corporate bonds and G-Secs with configurable tax treatment
+  - Edit button on bond card to update price override and quantity
+- **Net Worth dashboard** (All tab headline)
+  - Donut chart with total net worth and allocation by account type
+  - Two-toggle view: **By Account** (Equity | MF | Fixed Income | EPF | Bonds) and **By Asset Class** (Equity | Debt | Gold | Hybrid | Silver)
+  - **EPF correctly classified as Debt** — earns fixed 8.25%, no market risk; standard Indian financial planning practice
+  - **Cash/Liquid funds merged into Debt** — money-market instruments are the most liquid sub-category of debt
+  - SGB/Gold ETFs → Gold asset class
+  - Projected net worth chart with 36-month projection and milestone markers (₹50K → ₹1Cr)
+  - Bond holdings now included in total net worth and Gold asset class
+- **Asset class categorisation** (`/api/instrument-categories`)
+  - Auto-detects category from instrument name (gold ETFs, liquid funds, hybrid funds etc.)
+  - Per-instrument override via edit modal; stored in `instruments.asset_category`
+  - "Edit categories" link in XIRR Analysis section
+  - Re-run auto-detection button
+
+### Fixed
+- **Portfolio XIRR mismatch** (23.07% in summary card vs 12.62% in XIRR Analysis) — `compute_summary` was using `current_value` inflated with FI as the XIRR terminal value while outflows were equity+MF-only. Fixed by capturing `eq_mf_value` before adding FI to the display numbers
+- **Bond net worth invisible** — bonds in `bond_details` table were never read by `compute_networth`; SGB value was missing from total net worth and Gold asset class
+- **EPF passbook page-break parsing** — reverse split case (amounts on page N, month code first line of page N+1) now handled; both November 2024 and May 2026 entries correctly imported
+- **RD instalment off-by-one** — persists from v0.3.0; also applied to `compute_fi_summary`
+
+### Changed
+- **Segment tabs**: All | Equities | Mutual Funds | Fixed Income | EPF | Global | Bonds
+- Each special tab hides equity-specific panels (XIRR, Realized P&L, Equity Curve, Holdings, CAs) and shows only tab-specific content
+
+---
+
 ## [0.3.0] — 2026-05-31
 
 ### Added

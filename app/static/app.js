@@ -20,6 +20,765 @@ function escapeHtml(s) {
 
 let chart = null;
 
+// ---- Net Worth ----
+let nwDonutChart = null;
+let nwProjectionChart = null;
+let nwData = null;            // cached networth API response
+let nwView = "account";       // "account" | "asset_class"
+
+const CAT_LABELS = {
+  equity: "Equity", debt: "Debt", gold: "Gold",
+  hybrid: "Hybrid", cash: "Cash/Liquid", silver: "Silver",
+  epf: "EPF", other: "Other",
+};
+
+const ACCT_COLORS = { equity: "#58a6ff", mf: "#3fb950", fi: "#d29922", epf: "#a371f7", bonds: "#f0c14b" };
+const ACCT_LABELS = { equity: "Equities", mf: "Mutual Funds", fi: "Fixed Income", epf: "EPF", bonds: "Bonds/SGB" };
+
+function renderNwDonut(nw) {
+  const c = nw.current;
+  const ctx = document.getElementById("nw-donut").getContext("2d");
+  if (nwDonutChart) nwDonutChart.destroy();
+
+  let labels, values, colors;
+  if (nwView === "asset_class") {
+    const bd = nw.by_asset_class?.breakdown || {};
+    labels = Object.keys(bd).map(k => CAT_LABELS[k] || k);
+    values = Object.values(bd);
+    colors = Object.keys(bd).map(k => nw.by_asset_class?.colors?.[k] || "#444c56");
+  } else {
+    labels = Object.keys(ACCT_LABELS).filter(k => c[k] > 0).map(k => ACCT_LABELS[k]);
+    values = Object.keys(ACCT_LABELS).filter(k => c[k] > 0).map(k => c[k]);
+    colors = Object.keys(ACCT_LABELS).filter(k => c[k] > 0).map(k => ACCT_COLORS[k]);
+  }
+
+  nwDonutChart = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: 0 }],
+    },
+    options: {
+      responsive: false, cutout: "72%",
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => `${ctx.label}: ${fmtINR(ctx.parsed)}` } },
+      },
+    },
+  });
+
+  // Allocation strip
+  const strip = document.getElementById("nw-alloc-strip");
+  const total = c.total || 1;
+  if (nwView === "asset_class") {
+    const bd = nw.by_asset_class?.breakdown || {};
+    const pc = nw.by_asset_class?.pct || {};
+    const cl = nw.by_asset_class?.colors || {};
+    strip.innerHTML = Object.entries(bd).map(([k, v]) =>
+      `<div class="nw-alloc-item">
+        <div class="nw-alloc-label">${CAT_LABELS[k] || k}</div>
+        <div class="nw-alloc-val" style="color:${cl[k] || '#e6edf3'}">${fmtINR(v)}</div>
+        <div class="nw-alloc-bar" style="background:${cl[k] || '#444'};width:${Math.max(pc[k]||0,2)}px"></div>
+        <div class="muted small">${pc[k] || 0}%</div>
+      </div>`
+    ).join("");
+  } else {
+    strip.innerHTML = Object.entries(ACCT_LABELS)
+      .filter(([k]) => c[k] > 0)
+      .map(([k, label]) => {
+        const pct = Math.round(c[k] / total * 100);
+        return `<div class="nw-alloc-item">
+          <div class="nw-alloc-label">${label}</div>
+          <div class="nw-alloc-val" style="color:${ACCT_COLORS[k]}">${fmtINR(c[k])}</div>
+          <div class="nw-alloc-bar" style="background:${ACCT_COLORS[k]};width:${Math.max(pct,2)}px"></div>
+          <div class="muted small">${pct}%</div>
+        </div>`;
+      }).join("");
+  }
+}
+
+// View toggle buttons
+document.querySelectorAll(".nw-view-btn").forEach(btn => {
+  btn.addEventListener("click", async () => {
+    if (btn.dataset.view === "edit") { openCategoryEditor(); return; }
+    document.querySelectorAll(".nw-view-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    nwView = btn.dataset.view;
+    if (nwData) renderNwDonut(nwData);
+  });
+});
+
+// Category editor
+async function openCategoryEditor() {
+  const dialog = document.getElementById("cat-dialog");
+  const wrap   = document.getElementById("cat-table-wrap");
+  wrap.innerHTML = `<div class="muted small">Loading…</div>`;
+  dialog.showModal();
+  const cats = await api("/api/instrument-categories");
+  const VALID_CATS = ["equity","debt","gold","hybrid","cash","silver","epf","other"];
+  wrap.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr>
+      <th style="text-align:left;padding:6px;border-bottom:1px solid #2a3038">Symbol</th>
+      <th style="text-align:left;padding:6px;border-bottom:1px solid #2a3038">Name</th>
+      <th style="text-align:left;padding:6px;border-bottom:1px solid #2a3038">Category</th>
+    </tr></thead>
+    <tbody>
+    ${cats.map(c => `<tr data-isin="${c.isin}">
+      <td style="padding:5px 6px"><strong>${c.symbol}</strong></td>
+      <td style="padding:5px 6px;color:#8b949e;font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.name}</td>
+      <td style="padding:5px 6px">
+        <select class="cat-select" data-isin="${c.isin}" style="background:#0d1117;color:#e6edf3;border:1px solid #2a3038;padding:3px 6px;border-radius:4px;font-size:12px">
+          ${VALID_CATS.map(v => `<option value="${v}" ${c.category===v?'selected':''}>${CAT_LABELS[v]||v}</option>`).join('')}
+        </select>
+        ${c.category !== c.auto_detected ? `<span class="muted small" style="margin-left:4px">auto: ${c.auto_detected}</span>` : ''}
+      </td>
+    </tr>`).join('')}
+    </tbody>
+  </table>`;
+
+  // Save on change
+  wrap.querySelectorAll(".cat-select").forEach(sel => {
+    sel.addEventListener("change", async () => {
+      await api(`/api/instrument-categories/${sel.dataset.isin}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category: sel.value }),
+      });
+      if (nwData) { nwData = await api("/api/networth"); renderNwDonut(nwData); }
+    });
+  });
+}
+
+document.getElementById("cat-close")?.addEventListener("click", () =>
+  document.getElementById("cat-dialog").close());
+
+document.getElementById("cat-auto-btn")?.addEventListener("click", async () => {
+  await api("/api/instrument-categories/auto-detect", { method: "POST" });
+  const wrap = document.getElementById("cat-table-wrap");
+  wrap.innerHTML = `<div class="muted small">Re-running auto-detection…</div>`;
+  const cats = await api("/api/instrument-categories");
+  document.getElementById("cat-dialog").close();
+  if (nwData) { nwData = await api("/api/networth"); renderNwDonut(nwData); }
+  openCategoryEditor();
+});
+
+async function loadNetWorth() {
+  const banner    = document.getElementById("nw-banner");
+  const chartSec  = document.getElementById("nw-chart-section");
+  const isAll     = activeSegment === "all";
+  if (banner)   banner.style.display   = isAll ? "" : "none";
+  if (chartSec) chartSec.style.display = isAll ? "" : "none";
+  if (!isAll) return;
+
+  try {
+    const nw = await api("/api/networth");
+    const c = nw.current;
+
+    // Headline total
+    document.getElementById("nw-total").textContent = fmtINR(c.total);
+    document.getElementById("nw-asof").textContent  = `As of ${nw.as_of}`;
+
+    nwData = nw;
+    renderNwDonut(nw);
+
+    // Assumptions note
+    const asmEl = document.getElementById("nw-assumptions");
+    if (asmEl && nw.assumptions.equity_growth_rate) {
+      asmEl.textContent = `equity projected at ${nw.assumptions.equity_growth_rate}% · EPF at ${nw.assumptions.epf_rate}%`;
+    }
+
+    // Projection chart with milestones
+    const projCtx = document.getElementById("nw-projection-chart").getContext("2d");
+    if (nwProjectionChart) nwProjectionChart.destroy();
+
+    const histLabels = nw.history.map(h => h.month);
+    const histVals   = nw.history.map(h => h.total);
+    const projLabels = nw.projection.map(p => p.month);
+    const projVals   = nw.projection.map(p => p.total);
+    const allLabels  = [...histLabels, ...projLabels];
+    const histFull   = [...histVals, ...new Array(projLabels.length).fill(null)];
+    const projFull   = [...new Array(histLabels.length).fill(null), ...projVals];
+
+    // Build milestone annotation lines
+    const annotations = {};
+    nw.milestones.forEach((m, idx) => {
+      const monthIdx = allLabels.indexOf(m.month);
+      if (monthIdx < 0) return;
+      annotations[`ms${idx}`] = {
+        type: "line",
+        yMin: m.amount, yMax: m.amount,
+        borderColor: m.is_future ? "rgba(163,113,247,0.5)" : "rgba(63,185,80,0.6)",
+        borderWidth: 1, borderDash: [4, 4],
+        label: {
+          display: true, content: m.label,
+          position: "start",
+          color: m.is_future ? "#a371f7" : "#3fb950",
+          font: { size: 10 }, backgroundColor: "transparent",
+        },
+      };
+    });
+
+    // Register annotation plugin if available
+    if (window.ChartAnnotation) Chart.register(window.ChartAnnotation);
+
+    nwProjectionChart = new Chart(projCtx, {
+      type: "line",
+      data: {
+        labels: allLabels,
+        datasets: [
+          { label: "Historical", data: histFull,
+            borderColor: "#58a6ff", backgroundColor: "rgba(88,166,255,0.1)",
+            borderWidth: 2, fill: true, pointRadius: 0, tension: 0.3, spanGaps: false },
+          { label: "Projected", data: projFull,
+            borderColor: "#a371f7", backgroundColor: "transparent",
+            borderWidth: 1.5, borderDash: [5,4], pointRadius: 0, tension: 0.3, spanGaps: false },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: { labels: { color: "#e6edf3" } },
+          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${fmtINR(c.parsed.y)}` } },
+          annotation: Object.keys(annotations).length ? { annotations } : undefined,
+        },
+        scales: {
+          x: { ticks: { color: "#8b949e", maxTicksLimit: 10 }, grid: { color: "#2a3038" } },
+          y: { ticks: { color: "#8b949e", callback: v => fmtINR(v) }, grid: { color: "#2a3038" } },
+        },
+      },
+    });
+
+  } catch (e) {
+    console.error("Net worth load error:", e);
+  }
+}
+
+// ---- EPF section ----
+let epfMonthlyChart  = null;
+let epfInterestChart = null;
+let epfBalanceChart  = null;
+
+async function loadEpfSection() {
+  const section = document.getElementById("epf-section");
+  if (!section) return;
+  section.style.display = activeSegment === "EPF" ? "" : "none";
+  if (activeSegment !== "EPF") return;
+
+  try {
+    const s = await api("/api/epf/summary");
+
+    // Summary cards
+    const cards = document.getElementById("epf-summary-cards");
+    const card = (title, val, sub) =>
+      `<div class="card"><h3>${title}</h3><div class="value pos">${fmtINR(val)}</div>${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
+    cards.innerHTML =
+      card("Total Balance",      s.estimated_balance,          `${s.months_imported} months imported`) +
+      card("Employee Contributions", s.total_employee_contributions, "your share") +
+      card("Employer Contributions", s.total_employer_contributions, "company's share") +
+      card("Interest Credited",  s.total_interest_credited,    "EPF Board") +
+      card("EPS Pension",        s.total_pension_contributions, "pension fund") +
+      card("This FY",            s.fy_employee_contribution + s.fy_employer_contribution, "contributions this year");
+
+    // Monthly contributions chart
+    const months = s.monthly_contributions;
+    const mcCtx = document.getElementById("epf-monthly-chart").getContext("2d");
+    if (epfMonthlyChart) epfMonthlyChart.destroy();
+    epfMonthlyChart = new Chart(mcCtx, {
+      type: "bar",
+      data: {
+        labels: months.map(m => m.month.slice(0, 7)),
+        datasets: [
+          { label: "Employee", data: months.map(m => m.employee), backgroundColor: "rgba(88,166,255,0.7)" },
+          { label: "Employer", data: months.map(m => m.employer), backgroundColor: "rgba(63,185,80,0.7)" },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: "#e6edf3" } } },
+        scales: {
+          x: { stacked: true, ticks: { color: "#8b949e", maxTicksLimit: 12 }, grid: { color: "#2a3038" } },
+          y: { stacked: true, ticks: { color: "#8b949e", callback: v => fmtINR(v) }, grid: { color: "#2a3038" } },
+        },
+      },
+    });
+
+    // Balance growth line chart
+    let balRunning = 0;
+    const balData = months.map(m => { balRunning += m.employee + m.employer; return balRunning; });
+    const bgCtx = document.getElementById("epf-balance-chart").getContext("2d");
+    if (epfBalanceChart) epfBalanceChart.destroy();
+    epfBalanceChart = new Chart(bgCtx, {
+      type: "line",
+      data: {
+        labels: months.map(m => m.month.slice(0, 7)),
+        datasets: [{ label: "Balance", data: balData, borderColor: "#a371f7",
+          backgroundColor: "rgba(163,113,247,0.1)", fill: true, borderWidth: 2, pointRadius: 0, tension: 0.3 }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: "#8b949e", maxTicksLimit: 8 }, grid: { color: "#2a3038" } },
+          y: { ticks: { color: "#8b949e", callback: v => fmtINR(v) }, grid: { color: "#2a3038" } },
+        },
+      },
+    });
+
+    // Contribution ledger table
+    const allEntries = await api("/api/epf");
+    const tbody = document.querySelector("#epf-table tbody");
+    const countEl = document.getElementById("epf-entry-count");
+    if (countEl) countEl.textContent = `${allEntries.length} entries`;
+
+    tbody.innerHTML = "";
+    let running = 0;
+    for (const e of allEntries) {
+      running += (e.employee_share + e.employer_share) - (e.employee_withdrawal + e.employer_withdrawal);
+      const typeLabel = e.entry_type === "interest" ? "Interest" : e.entry_type === "withdrawal" ? "Withdrawal" : "Contribution";
+      const cls_type  = e.entry_type === "interest" ? "pos" : e.entry_type === "withdrawal" ? "neg" : "";
+      tbody.innerHTML += `
+        <tr>
+          <td>${e.month.slice(0, 7)}</td>
+          <td class="${cls_type}">${typeLabel}</td>
+          <td class="num">${e.employee_share > 0 ? fmtINR(e.employee_share) : "—"}</td>
+          <td class="num">${e.employer_share > 0 ? fmtINR(e.employer_share) : "—"}</td>
+          <td class="num">${e.pension_contrib > 0 ? fmtINR(e.pension_contrib) : "—"}</td>
+          <td class="num pos">${fmtINR(running)}</td>
+        </tr>`;
+    }
+    if (!allEntries.length) {
+      tbody.innerHTML = `<tr><td colspan="6" class="muted" style="text-align:center;padding:20px">
+        No EPF data yet — click <strong>Import EPF Passbook</strong> in the Transactions section to import your passbook.</td></tr>`;
+    }
+
+    if (!months.length && !allEntries.length) {
+      cards.innerHTML = `<div class="muted" style="padding:12px">No EPF data yet — import your EPFO passbook PDF to get started.</div>`;
+    }
+
+  } catch (e) {
+    console.error("EPF section load error:", e);
+  }
+}
+
+// ---- Bonds ----
+
+async function loadBondsSection() {
+  const sec = document.getElementById("bonds-section");
+  if (!sec) return;
+  sec.style.display = activeSegment === "BONDS" ? "" : "none";
+  if (activeSegment !== "BONDS") return;
+
+  const content = document.getElementById("bonds-content");
+  content.innerHTML = `<div class="muted small">Loading…</div>`;
+
+  try {
+    const holdings = await api("/api/bonds");
+    if (!holdings.length) {
+      content.innerHTML = `<div class="muted" style="padding:16px">
+        No bond details registered yet.<br>
+        <strong>Note:</strong> Your transactions (buys/sells) are in the equity tradebook.
+        Click <strong>+ Add bond details</strong> to register the bond metadata (issue price, coupon, maturity date, tax treatment).
+        SGBDEC31III is pre-seeded — just click the button to confirm.
+      </div>`;
+      return;
+    }
+
+    let html = "";
+    for (const b of holdings) {
+      const dtm = b.days_to_maturity;
+      const dtmLabel = dtm < 0 ? `Matured ${Math.abs(dtm)}d ago`
+                      : dtm < 365 ? `${dtm}d to maturity`
+                      : `${(dtm/365).toFixed(1)}y to maturity`;
+      const exemptBadge = b.capital_gains_exempt_at_maturity
+        ? `<span class="fi-badge active" style="background:rgba(63,185,80,.15);color:var(--pos)">Capital gains EXEMPT at maturity</span>`
+        : `<span class="fi-badge matured">STCG/LTCG applicable</span>`;
+
+      html += `
+      <div class="card" style="margin-bottom:14px">
+        <div class="row-between" style="margin-bottom:10px">
+          <div>
+            <strong style="font-size:16px">${b.symbol}</strong>
+            <span class="muted" style="font-size:12px;margin-left:8px">${b.full_name || ''}</span>
+            <span class="fi-badge active" style="margin-left:8px">${b.bond_type}</span>
+          </div>
+          <div class="actions">
+            ${exemptBadge}
+            <button class="edit-btn bond-edit-btn" data-id="${b.id}">edit</button>
+          </div>
+        </div>
+        <div class="cards" style="margin-bottom:12px">
+          <div class="card"><h3>Units Held</h3><div class="value">${b.units || '—'}</div></div>
+          <div class="card"><h3>Issue Price</h3><div class="value">${fmtINR(b.issue_price)}</div></div>
+          <div class="card"><h3>Current Price</h3><div class="value">${b.current_price ? fmtINR(b.current_price) : '—'}</div><div class="sub muted">${b.price_source || ''}</div></div>
+          <div class="card"><h3>Current Value</h3><div class="value ${cls(b.unrealized_pnl)}">${b.current_value ? fmtINR(b.current_value) : '—'}</div></div>
+          <div class="card"><h3>P&L</h3><div class="value ${cls(b.unrealized_pnl)}">${b.unrealized_pnl != null ? fmtINR(b.unrealized_pnl) : '—'}</div><div class="sub">${b.pct_return != null ? b.pct_return.toFixed(2)+'%' : ''}</div></div>
+          <div class="card"><h3>Maturity</h3><div class="value">${b.maturity_date}</div><div class="sub muted">${dtmLabel}</div></div>
+        </div>
+
+        <!-- Interest income -->
+        ${b.coupon_rate > 0 ? `
+        <div style="border-top:1px solid var(--border);padding-top:12px;margin-bottom:10px">
+          <strong style="font-size:13px">Interest Income</strong>
+          <span class="muted small" style="margin-left:6px">${b.coupon_rate}% p.a. on issue price · ${b.coupon_frequency}</span>
+          <div class="cards" style="margin-top:8px">
+            <div class="card"><h3>Total Earned</h3><div class="value pos">${fmtINR(b.total_interest_earned)}</div><div class="sub">taxable at slab rate</div></div>
+            <div class="card"><h3>This FY</h3><div class="value pos">${fmtINR(b.fy_interest)}</div></div>
+            <div class="card"><h3>Next Coupon</h3><div class="value">${b.next_coupon_date || '—'}</div><div class="sub">${b.next_coupon_amount ? fmtINR(b.next_coupon_amount) : ''}</div></div>
+          </div>
+          <details style="margin-top:8px">
+            <summary style="cursor:pointer;color:var(--muted);font-size:12px">Full coupon schedule (${b.coupon_schedule?.length || 0} payments)</summary>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+              ${(b.coupon_schedule || []).map(c =>
+                `<span style="background:${c.received ? 'rgba(63,185,80,.12)' : 'rgba(139,148,158,.1)'};color:${c.received ? 'var(--pos)' : 'var(--muted)'};padding:3px 8px;border-radius:4px;font-size:11px">
+                  ${c.date}: ${fmtINR(c.amount)} ${c.received ? '✓' : ''}
+                </span>`
+              ).join('')}
+            </div>
+          </details>
+        </div>` : ''}
+
+        <!-- Tax note -->
+        <div class="muted small" style="border-top:1px solid var(--border);padding-top:10px;line-height:1.6">
+          <strong>Tax:</strong> ${b.tax_note}
+        </div>
+      </div>`;
+    }
+    content.innerHTML = html;
+  } catch (e) {
+    content.innerHTML = `<div class="neg small">Error: ${escapeHtml(e.message)}</div>`;
+    console.error(e);
+  }
+}
+
+// Bond modal
+const bondDialog = document.getElementById("bond-dialog");
+const bondForm   = document.getElementById("bond-form");
+document.getElementById("btn-bond-add")?.addEventListener("click", () => {
+  bondForm.reset();
+  document.getElementById("bond-form-title").textContent = "Add Bond Details";
+  bondDialog.showModal();
+});
+document.getElementById("bond-cancel")?.addEventListener("click", (e) => {
+  e.preventDefault(); bondDialog.close();
+});
+bondForm?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const fd = new FormData(bondForm);
+  const purchasePriceRaw = fd.get("purchase_price");
+  const payload = {
+    symbol:           fd.get("symbol").toUpperCase().trim(),
+    bond_type:        fd.get("bond_type"),
+    full_name:        fd.get("full_name") || null,
+    isin:             fd.get("isin") || null,
+    issue_price:      parseFloat(fd.get("issue_price")),
+    issue_date:       fd.get("issue_date"),
+    maturity_date:    fd.get("maturity_date"),
+    coupon_rate:      parseFloat(fd.get("coupon_rate") || 0),
+    coupon_frequency: fd.get("coupon_frequency"),
+    quantity:         parseFloat(fd.get("quantity") || 0),
+    purchase_price:   purchasePriceRaw ? parseFloat(purchasePriceRaw) : null,
+    purchase_date:    fd.get("purchase_date") || null,
+    price_override:   fd.get("price_override") ? parseFloat(fd.get("price_override")) : null,
+    capital_gains_exempt_at_maturity: fd.get("capital_gains_exempt_at_maturity") === "on",
+    notes:            fd.get("notes") || null,
+  };
+  try {
+    await api("/api/bonds/details", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    bondDialog.close();
+    await loadBondsSection();
+  } catch (err) { alert("Save failed: " + err.message); }
+});
+
+// Edit existing bond — delegate from bonds-content div
+document.getElementById("bonds-content")?.addEventListener("click", async (e) => {
+  if (!e.target.classList.contains("bond-edit-btn")) return;
+  const id = e.target.dataset.id;
+  const details = await api("/api/bonds/details");
+  const b = details.find(d => String(d.id) === String(id));
+  if (!b) return;
+
+  bondForm.reset();
+  document.getElementById("bond-form-title").textContent = "Edit Bond Details";
+  bondForm.querySelector('[name="symbol"]').value        = b.symbol;
+  bondForm.querySelector('[name="bond_type"]').value     = b.bond_type;
+  bondForm.querySelector('[name="full_name"]').value     = b.full_name || "";
+  bondForm.querySelector('[name="isin"]').value          = b.isin || "";
+  bondForm.querySelector('[name="issue_price"]').value   = b.issue_price;
+  bondForm.querySelector('[name="issue_date"]').value    = b.issue_date;
+  bondForm.querySelector('[name="maturity_date"]').value = b.maturity_date;
+  bondForm.querySelector('[name="coupon_rate"]').value   = b.coupon_rate;
+  bondForm.querySelector('[name="coupon_frequency"]').value = b.coupon_frequency;
+  bondForm.querySelector('[name="quantity"]').value      = b.quantity || 0;
+  bondForm.querySelector('[name="purchase_price"]').value = b.purchase_price || "";
+  bondForm.querySelector('[name="purchase_date"]').value  = b.purchase_date || "";
+  bondForm.querySelector('[name="price_override"]').value = b.price_override || "";
+  bondForm.querySelector('[name="capital_gains_exempt_at_maturity"]').checked =
+    b.capital_gains_exempt_at_maturity;
+  bondForm.querySelector('[name="notes"]').value = b.notes || "";
+
+  bondDialog.showModal();
+});
+
+// ---- Global Equities ----
+
+async function loadGlobalSection() {
+  const sec = document.getElementById("global-section");
+  if (!sec) return;
+  sec.style.display = activeSegment === "GLOBAL" ? "" : "none";
+  if (activeSegment !== "GLOBAL") return;
+
+  try {
+    const [summary, txns] = await Promise.all([
+      api("/api/global-equity/summary"),
+      api("/api/global-equity"),
+    ]);
+
+    // USD/INR label
+    const fx = document.getElementById("global-usdinr");
+    if (fx && summary.usdinr) fx.textContent = `USD/INR: ${summary.usdinr}`;
+
+    // Summary mini-cards
+    const sc = document.getElementById("global-summary-cards");
+    const card = (title, val, sub) =>
+      `<div class="card"><h3>${title}</h3><div class="value">${val}</div>${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
+    sc.innerHTML =
+      card("Invested (USD)",  `$${(summary.invested_usd||0).toFixed(2)}`, `₹${fmtINR(summary.invested_inr||0).replace('₹','')}`) +
+      card("Current (USD)",   `$${(summary.total_usd||0).toFixed(2)}`,    `₹${fmtINR(summary.total_inr||0).replace('₹','')}`) +
+      card("P&L (USD)", `$${((summary.total_usd||0)-(summary.invested_usd||0)).toFixed(2)}`, null);
+
+    // Holdings table
+    const htbody = document.querySelector("#global-holdings-table tbody");
+    htbody.innerHTML = "";
+    for (const h of summary.holdings || []) {
+      const badge = h.status === "closed"
+        ? `<span class="fi-badge matured">Closed</span>`
+        : `<span class="fi-badge active">Active</span>`;
+      htbody.innerHTML += `<tr>
+        <td><strong>${h.symbol}</strong><br><span class="muted" style="font-size:11px">${h.name||''}</span></td>
+        <td class="num">${h.quantity || "—"}</td>
+        <td class="num">${h.avg_cost_usd ? `$${h.avg_cost_usd.toFixed(4)}` : "—"}</td>
+        <td class="num">${h.current_price_usd ? `$${h.current_price_usd.toFixed(2)}` : "—"}</td>
+        <td class="num">${h.invested_usd ? `$${h.invested_usd.toFixed(2)}` : "—"}</td>
+        <td class="num">${h.current_value_usd != null ? `$${h.current_value_usd.toFixed(2)}` : "—"}</td>
+        <td class="num ${(h.unrealized_pnl_usd||0) >= 0 ? 'pos' : 'neg'}">${h.unrealized_pnl_usd != null ? `$${h.unrealized_pnl_usd.toFixed(2)}` : h.realized_pnl_usd ? `$${h.realized_pnl_usd.toFixed(2)}` : "—"}</td>
+        <td class="num ${(h.unrealized_pnl_inr||0) >= 0 ? 'pos' : 'neg'}">${h.unrealized_pnl_inr != null ? fmtINR(h.unrealized_pnl_inr) : "—"}</td>
+        <td class="num ${(h.pct_return||0) >= 0 ? 'pos' : 'neg'}">${h.pct_return != null ? h.pct_return.toFixed(2)+'%' : "—"}</td>
+        <td>${badge}</td>
+      </tr>`;
+    }
+    if (!summary.holdings?.length) {
+      htbody.innerHTML = `<tr><td colspan="10" class="muted" style="text-align:center;padding:20px">No global equity transactions yet — import your INDMoney XLS or add manually.</td></tr>`;
+    }
+
+    // Transaction history
+    const ttbody = document.querySelector("#global-txn-table tbody");
+    ttbody.innerHTML = "";
+    for (const t of txns) {
+      ttbody.innerHTML += `<tr>
+        <td>${t.trade_date}</td>
+        <td><strong>${t.symbol}</strong></td>
+        <td class="${t.trade_type==='buy'?'pos':'neg'}">${t.trade_type}</td>
+        <td class="num">${t.quantity.toFixed(6)}</td>
+        <td class="num">$${t.price_usd.toFixed(4)}</td>
+        <td class="num">$${t.amount_usd.toFixed(4)}</td>
+        <td class="num">${t.fees_usd.toFixed(2)}</td>
+        <td class="num">${t.exchange_rate ? t.exchange_rate.toFixed(2) : '—'}</td>
+        <td class="num">${t.amount_inr ? fmtINR(t.amount_inr) : '—'}</td>
+        <td><button class="delete-btn global-del-btn" data-id="${t.id}">delete</button></td>
+      </tr>`;
+    }
+  } catch (e) {
+    console.error("Global equity load error:", e);
+  }
+}
+
+let globalCurveChart = null;
+
+async function loadGlobalAnalytics() {
+  if (activeSegment !== "GLOBAL") return;
+  try {
+    // Load all three in parallel — these involve yfinance calls so may be slow
+    const [xirrData, curveData, taxData] = await Promise.all([
+      api("/api/global-equity/xirr"),
+      api("/api/global-equity/equity-curve"),
+      api("/api/global-equity/tax"),
+    ]);
+
+    // ---- XIRR section ----
+    const xirrSec = document.getElementById("global-xirr-section");
+    xirrSec.style.display = "";
+    const box = (label, val, sub, klass) =>
+      `<div class="xirr-box ${klass}">
+        <div class="label">${label}</div>
+        <div class="xirr-val ${cls(val)}">${val != null ? (val*100).toFixed(2)+'%' : '—'}</div>
+        ${sub ? `<div class="sub">${sub}</div>` : ""}
+      </div>`;
+    let xirrHtml = box("Portfolio XIRR (USD)", xirrData.portfolio_xirr, "global equities", "portfolio-box");
+    for (const [ticker, b] of Object.entries(xirrData.benchmarks || {})) {
+      const diff = xirrData.portfolio_xirr != null && b.xirr != null
+        ? xirrData.portfolio_xirr - b.xirr : null;
+      const diffStr = diff != null ? `${diff >= 0 ? "+" : ""}${(diff*100).toFixed(2)}% vs index` : null;
+      xirrHtml += box(b.name, b.xirr, diffStr, "");
+    }
+    document.getElementById("global-xirr-cards").innerHTML = xirrHtml;
+
+    // ---- Equity curve ----
+    const curveSec = document.getElementById("global-curve-section");
+    curveSec.style.display = "";
+    const sub = document.getElementById("global-curve-subtitle");
+    if (sub && curveData.base_date)
+      sub.textContent = `All series rebased to 100 on ${curveData.base_date} · USD`;
+
+    const ctx = document.getElementById("global-curve-chart").getContext("2d");
+    if (globalCurveChart) globalCurveChart.destroy();
+    const COLORS = { "Portfolio": "#e6edf3", "S&P 500": "#58a6ff", "NASDAQ 100": "#3fb950" };
+    const datasets = Object.entries(curveData.series || {}).map(([name, vals]) => ({
+      label: name,
+      data: vals,
+      borderColor: COLORS[name] || "#a371f7",
+      backgroundColor: "transparent",
+      borderWidth: name === "Portfolio" ? 2 : 1.5,
+      pointRadius: 0, spanGaps: true, tension: 0.1,
+    }));
+    globalCurveChart = new Chart(ctx, {
+      type: "line",
+      data: { labels: curveData.dates, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: { labels: { color: "#e6edf3" } },
+          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y != null ? c.parsed.y.toFixed(2) : "—"}` } },
+        },
+        scales: {
+          x: { ticks: { color: "#8b949e", maxTicksLimit: 10 }, grid: { color: "#2a3038" } },
+          y: { ticks: { color: "#8b949e" }, grid: { color: "#2a3038" } },
+        },
+      },
+    });
+
+    // ---- Tax section ----
+    const taxSec = document.getElementById("global-tax-section");
+    taxSec.style.display = "";
+
+    const taxCard = (title, val, sub, klass = "") =>
+      `<div class="card"><h3>${title}</h3><div class="value ${klass}">${fmtINR(val)}</div>${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
+
+    const stcg30 = taxData.tax_estimate?.stcg_at_30_pct || 0;
+    const stcg20 = taxData.tax_estimate?.stcg_at_20_pct || 0;
+    const ltcgTax = taxData.tax_estimate?.ltcg_at_12_5 || 0;
+
+    document.getElementById("global-tax-summary").innerHTML =
+      taxCard("Total Realized (INR)", taxData.total_realized_inr, null, cls(taxData.total_realized_inr)) +
+      taxCard("STCG (< 24 months)", taxData.stcg_inr, "at your slab rate", cls(taxData.stcg_inr)) +
+      taxCard("Est. Tax @ 30%",     stcg30, "STCG at 30% slab", "neg") +
+      taxCard("Est. Tax @ 20%",     stcg20, "STCG at 20% slab", "neg") +
+      taxCard("LTCG (≥ 24 months)", taxData.ltcg_inr, "at 12.5%, no exemption", cls(taxData.ltcg_inr)) +
+      (ltcgTax > 0 ? taxCard("LTCG Tax @ 12.5%", ltcgTax, "no ₹1.25L exemption for foreign equity", "neg") : "");
+
+    document.getElementById("global-tax-note").innerHTML =
+      taxData.tax_estimate?.note || "";
+
+    // Tax breakdown table
+    const tbody = document.querySelector("#global-tax-table tbody");
+    tbody.innerHTML = "";
+    for (const r of (taxData.breakdown || [])) {
+      const typeClass = r.type === "LTCG" ? "pos" : "neg";
+      tbody.innerHTML += `<tr>
+        <td><strong>${r.symbol}</strong></td>
+        <td>${r.buy_date}</td><td>${r.sell_date}</td>
+        <td class="num">${r.held_months}mo</td>
+        <td class="${typeClass}">${r.type}</td>
+        <td class="num ${cls(r.pnl_usd)}">$${r.pnl_usd.toFixed(4)}</td>
+        <td class="num">${fmtINR(r.cost_inr)}</td>
+        <td class="num">${fmtINR(r.proceeds_inr)}</td>
+        <td class="num ${cls(r.pnl_inr)}">${fmtINR(r.pnl_inr)}</td>
+      </tr>`;
+    }
+    if (!taxData.breakdown?.length)
+      tbody.innerHTML = `<tr><td colspan="9" class="muted" style="text-align:center;padding:16px">No realized transactions yet.</td></tr>`;
+
+  } catch (e) {
+    console.error("Global analytics error:", e);
+  }
+}
+
+// Import handler
+document.getElementById("import-global-input")?.addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById("global-import-status");
+  const fillEl   = document.getElementById("global-progress-fill");
+  const msgEl    = document.getElementById("global-import-msg");
+  statusEl.style.display = "";
+  fillEl.style.width = "30%";
+  msgEl.innerHTML = `<span class="muted">Importing…</span>`;
+  setTimeout(() => { fillEl.style.transition = "width 1.5s"; fillEl.style.width = "70%"; }, 100);
+  const fd = new FormData(); fd.append("file", file);
+  try {
+    const r = await api("/api/import-global", { method: "POST", body: fd });
+    fillEl.style.width = "100%";
+    if (r.inserted > 0) {
+      msgEl.innerHTML = `<span class="pos">✓ Imported ${r.inserted} transactions (${r.skipped_duplicates} duplicates, ${r.total_found} found).</span>`;
+      await loadGlobalSection();
+    } else if (r.total_found === 0) {
+      msgEl.innerHTML = `<span class="neg">⚠ No transactions found. Check that this is the INDMoney Global Equity Full Report.</span>`;
+    } else {
+      msgEl.innerHTML = `<span class="muted">${r.inserted} new, ${r.skipped_duplicates} already imported.</span>`;
+    }
+    if (r.errors?.length) msgEl.innerHTML += `<br><span class="neg">${r.errors.slice(0,2).join("; ")}</span>`;
+  } catch (err) {
+    fillEl.style.background = "var(--neg)"; fillEl.style.width = "100%";
+    msgEl.innerHTML = `<span class="neg">✗ ${escapeHtml(err.message)}</span>`;
+  }
+  e.target.value = "";
+});
+
+// Delete transaction
+document.querySelector("#global-txn-table tbody")?.addEventListener("click", async (e) => {
+  if (!e.target.classList.contains("global-del-btn")) return;
+  if (!confirm("Delete this transaction?")) return;
+  await api(`/api/global-equity/${e.target.dataset.id}`, { method: "DELETE" });
+  await loadGlobalSection();
+});
+
+// Manual add modal
+const globalDialog = document.getElementById("global-dialog");
+const globalForm   = document.getElementById("global-form");
+
+document.getElementById("btn-global-add")?.addEventListener("click", () => {
+  globalForm.reset();
+  globalForm.querySelector('input[name="trade_date"]').valueAsDate = new Date();
+  globalDialog.showModal();
+});
+document.getElementById("global-cancel")?.addEventListener("click", (e) => {
+  e.preventDefault(); globalDialog.close();
+});
+globalForm?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const fd = new FormData(globalForm);
+  const payload = {
+    symbol: fd.get("symbol").toUpperCase().trim(),
+    stock_name: fd.get("stock_name") || null,
+    trade_date: fd.get("trade_date"),
+    trade_type: fd.get("trade_type"),
+    quantity: parseFloat(fd.get("quantity")),
+    price_usd: parseFloat(fd.get("price_usd")),
+    fees_usd: parseFloat(fd.get("fees_usd") || 0),
+    exchange_rate: fd.get("exchange_rate") ? parseFloat(fd.get("exchange_rate")) : null,
+    notes: fd.get("notes") || null,
+  };
+  try {
+    await api("/api/global-equity", { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    globalDialog.close();
+    await loadGlobalSection();
+  } catch (err) { alert("Save failed: " + err.message); }
+});
+
 // ---- FI benchmark rates editor ----
 async function openFiRatesEditor() {
   const rates = await api("/api/fi/rates");
@@ -347,17 +1106,38 @@ document.querySelectorAll(".seg-btn").forEach((btn) => {
     if (folioTh) folioTh.style.display = activeSegment === "MF" ? "" : "none";
     if (symTh)   symTh.textContent     = activeSegment === "MF" ? "Scheme" : "Symbol";
 
-    const isFI = activeSegment === "FI";
+    const isFI     = activeSegment === "FI";
+    const isEPF    = activeSegment === "EPF";
+    const isGlobal = activeSegment === "GLOBAL";
+    const isBonds  = activeSegment === "BONDS";
 
-    // On FI tab: hide equity-specific panels (they show zeros or irrelevant data)
-    const equityOnlyPanels = ["xirr", "realized", "chart", "holdings", "ca", "aliases", "fi-charts", "txns"];
+    // Section visibility for special tabs
+    const globalSec = document.getElementById("global-section");
+    if (globalSec) globalSec.style.display = isGlobal ? "" : "none";
+    const bondsSec = document.getElementById("bonds-section");
+    if (bondsSec) bondsSec.style.display = isBonds ? "" : "none";
+
+    // Equity/MF panels — hidden on FI, EPF, Global, and Bonds tabs
+    const hideOnSpecial = isFI || isEPF || isGlobal || isBonds;
+    const equityOnlyPanels = ["xirr", "realized", "chart", "holdings", "ca", "aliases", "txns", "nw-chart"];
     equityOnlyPanels.forEach(sec => {
       const el = document.querySelector(`[data-section="${sec}"]`);
-      if (el) el.style.display = isFI ? "none" : "";
+      if (el) el.style.display = hideOnSpecial ? "none" : "";
     });
-    // Also hide the generic summary cards — FI section has its own mini-cards
+
+    // FI-specific panels — only visible on FI tab
+    const fiSection     = document.getElementById("fi-section");
+    const fiChartSection = document.getElementById("fi-charts-section");
+    if (fiSection)      fiSection.style.display      = isFI ? "" : "none";
+    if (fiChartSection) fiChartSection.style.display = isFI ? "" : "none";
+
+    // EPF section — only on EPF tab
+    const epfSec = document.getElementById("epf-section");
+    if (epfSec) epfSec.style.display = isEPF ? "" : "none";
+
+    // Generic summary cards hidden on FI and EPF tabs
     const summarySection = document.getElementById("summary-cards");
-    if (summarySection) summarySection.style.display = isFI ? "none" : "";
+    if (summarySection) summarySection.style.display = hideOnSpecial ? "none" : "";
 
     // On tab switch: skip management panels (transactions/CAs/aliases don't change)
     refreshAll(true);
@@ -866,6 +1646,81 @@ document.getElementById("import-cas-input").addEventListener("change", async (e)
   }
 });
 
+// --- EPF Passbook import (shared handler used by both the Transactions button and EPF tab button) ---
+async function runEpfImport(file, statusEl, progressFill, msgEl) {
+  // Show progress bar indeterminate animation
+  if (statusEl)     statusEl.style.display = "";
+  if (progressFill) { progressFill.style.width = "30%"; progressFill.style.transition = "none"; }
+  if (msgEl)        msgEl.innerHTML = `<span class="muted">Reading PDF…</span>`;
+
+  // Animate to 70% while waiting
+  setTimeout(() => { if (progressFill) { progressFill.style.transition = "width 1.5s"; progressFill.style.width = "70%"; } }, 100);
+
+  const fd = new FormData();
+  fd.append("file", file);
+  try {
+    const r = await api("/api/import-epf", { method: "POST", body: fd });
+    if (progressFill) progressFill.style.width = "100%";
+
+    if (r.inserted > 0) {
+      if (msgEl) msgEl.innerHTML =
+        `<span class="pos">✓ Imported ${r.inserted} entries (${r.skipped_duplicates} duplicates skipped, ${r.entries_found} found in PDF).</span>`;
+      await loadEpfSection();
+    } else if (r.entries_found === 0) {
+      if (msgEl) msgEl.innerHTML =
+        `<span class="neg">⚠ No entries found in PDF. The passbook format may differ — ` +
+        `<a href="#" id="epf-debug-link" style="color:var(--accent)">click here to see extracted text</a> for diagnosis.</span>`;
+      // Wire debug link
+      setTimeout(() => {
+        const link = document.getElementById("epf-debug-link");
+        if (link) link.addEventListener("click", async (ev) => {
+          ev.preventDefault();
+          const fd2 = new FormData(); fd2.append("file", file);
+          try {
+            const dbg = await api("/api/epf/debug-pdf", { method: "POST", body: fd2 });
+            const pre = document.createElement("pre");
+            pre.style.cssText = "font-size:11px;max-height:300px;overflow:auto;background:#0d1117;padding:8px;border-radius:4px;margin-top:8px;white-space:pre-wrap";
+            pre.textContent = dbg.text_preview;
+            link.parentElement.appendChild(pre);
+          } catch (e2) { alert("Debug failed: " + e2.message); }
+        });
+      }, 100);
+    } else {
+      if (msgEl) msgEl.innerHTML =
+        `<span class="muted">${r.inserted} new, ${r.skipped_duplicates} already imported (${r.entries_found} total found).</span>`;
+    }
+    if (r.errors?.length && msgEl) {
+      msgEl.innerHTML += `<br><span class="neg">Errors: ${r.errors.slice(0, 3).map(escapeHtml).join("; ")}</span>`;
+    }
+  } catch (err) {
+    if (progressFill) progressFill.style.width = "100%";
+    if (progressFill) progressFill.style.background = "var(--neg)";
+    if (msgEl) msgEl.innerHTML = `<span class="neg">✗ Import failed: ${escapeHtml(err.message)}</span>`;
+  }
+}
+
+// EPF import from Transactions section (existing button)
+document.getElementById("import-epf-input").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const result = document.getElementById("import-result");
+  result.innerHTML = "";
+  await runEpfImport(file, null, null, result);
+  e.target.value = "";
+});
+
+// EPF import from EPF tab (new button in EPF section header)
+document.getElementById("epf-tab-import")?.addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById("epf-import-status");
+  const fillEl   = document.getElementById("epf-progress-fill");
+  const msgEl    = document.getElementById("epf-import-msg");
+  fillEl.style.background = "var(--accent)";  // reset color
+  await runEpfImport(file, statusEl, fillEl, msgEl);
+  e.target.value = "";
+});
+
 // --- Tradebook import (Equities) ---
 
 document.getElementById("import-input").addEventListener("change", async (e) => {
@@ -1189,11 +2044,15 @@ async function refreshAll(tabSwitch = false) {
   }
   await Promise.all(phase1);
 
-  // Phase 2 — slow (equity curve + full XIRR): fire and forget so the page is
-  // already usable. A loading indicator is shown while they compute.
+  // Phase 2 — slow (equity curve + full XIRR + net worth): fire and forget
   Promise.all([
     loadEquityCurve(),
     loadXirrAnalysis(xirrPeriod),
+    loadNetWorth(),
+    loadEpfSection(),
+    loadGlobalSection(),
+    loadGlobalAnalytics(),   // XIRR + curve + tax (involves yfinance, slow)
+    loadBondsSection(),
   ]).catch(console.error);
 }
 

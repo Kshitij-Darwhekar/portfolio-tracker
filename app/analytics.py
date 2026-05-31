@@ -710,12 +710,17 @@ def compute_summary(db: Session, today: date | None = None, segment: str | None 
     today = today or date.today()
     holdings = compute_holdings(db, today, segment=segment)
     invested = sum(h.invested for h in holdings)
-    current_value = sum(h.current_value or 0 for h in holdings)
+    # eq_mf_value is the EQ+MF-only terminal value used for XIRR.
+    # It must NOT include FI so that the XIRR cashflows and terminal value are consistent.
+    eq_mf_value   = sum(h.current_value or 0 for h in holdings)
+    current_value = eq_mf_value   # display value; FI will be added below for cards only
     realized = sum(h.realized_pnl for h in holdings)
     unrealized = current_value - invested if invested else 0
     total_pnl = realized + unrealized
 
-    # Add FI to the combined wealth picture (invested + current value only, NOT XIRR)
+    # Add FI to the wealth DISPLAY numbers (invested, current, P&L on summary cards).
+    # FI is intentionally excluded from XIRR — its cashflows would distort the
+    # NIFTY benchmark comparison which only applies to market-linked assets.
     fi_invested = 0.0
     fi_current  = 0.0
     if segment is None:   # combined "All" view
@@ -725,27 +730,24 @@ def compute_summary(db: Session, today: date | None = None, segment: str | None 
             r.amount if r.fi_type != "RD"
             else r.amount * min(
                 max(0, (today.year - r.start_date.year) * 12 +
-                        (today.month - r.start_date.month) + 1),  # +1: start month counts
+                        (today.month - r.start_date.month) + 1),
                 _rd_months(r.start_date, r.maturity_date)
             )
             for r in fi_rows
         )
         fi_current  = sum(r.current_value for r in fi_rows)
-        invested     += fi_invested
-        current_value += fi_current
-        total_pnl    += (fi_current - fi_invested)
+        invested      += fi_invested
+        current_value += fi_current       # display card value includes FI
+        total_pnl     += (fi_current - fi_invested)
 
     q = select(Transaction)
     if segment:
         q = q.where(Transaction.segment == segment)
     txns = db.execute(q).scalars().all()
-    # XIRR is computed per asset class only — FDs are NOT mixed into equity/MF XIRR.
-    # Reason: the NIFTY benchmark comparison only makes sense for market-linked assets.
-    # FD returns (guaranteed ~7%) would distort the comparison in both directions.
-    # FI contributes to the wealth SUMMARY (invested/current value) but not to XIRR.
+    # XIRR terminal uses eq_mf_value (never current_value which may include FI)
     flows = portfolio_cashflows(db, txns, include_fi=False)
-    if current_value > 0:
-        flows.append((today, current_value))
+    if eq_mf_value > 0:
+        flows.append((today, eq_mf_value))
     portfolio_xirr = xirr(flows)
 
     # Benchmark XIRR — replay portfolio cashflows into each index

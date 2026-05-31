@@ -25,8 +25,19 @@ from .analytics import (
 )
 from .corporate_actions import auto_fetch_all
 from .fi_rates import load_fi_rates, update_fi_rate
-from .db import CorporateAction, FixedIncome, Transaction, get_session, init_db
+from .db import (BondDetail, CorporateAction, EPFEntry, FixedIncome,
+                 GlobalEquityTransaction, Transaction, get_session, init_db)
 from .importer import import_tradebook
+from .bond_analytics import compute_bond_holdings
+from .categorizer import auto_detect_category, ensure_all_categorised
+from .global_equity_analytics import (
+    compute_global_equity_curve,
+    compute_global_tax,
+    compute_global_xirr,
+)
+from .global_equity_importer import import_indmoney_global
+from .epf_importer import import_epf_passbook
+from .networth import compute_networth
 from .mf_importer import import_cas_pdf
 from .prices import BENCHMARKS, add_symbol_alias, list_symbol_aliases, remove_symbol_alias
 from .xirr import xirr
@@ -174,6 +185,129 @@ async def import_file(file: UploadFile = File(...), db: Session = Depends(get_se
     return JSONResponse(result)
 
 
+@app.post("/api/epf/debug-pdf")
+async def debug_epf_pdf(file: UploadFile = File(...)):
+    """Extract text from the EPF PDF and return it for debugging.
+    PII patterns (UAN, Member ID, DOB, mobile) are redacted automatically.
+    Use this when the normal import returns 0 entries to see what text PyMuPDF extracts.
+    """
+    import fitz, tempfile, os, re
+    content = await file.read()
+    pii_patterns = [
+        re.compile(r'\b\d{12}\b'),              # 12-digit UAN
+        re.compile(r'[A-Z]{2}\w{7,}'),          # Member ID-like
+        re.compile(r'\b\d{10}\b'),               # mobile
+        re.compile(r'\d{2}[/-]\d{2}[/-]\d{4}(?!\s*\d)'),  # keep dates used in transactions
+    ]
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+    try:
+        doc = fitz.open(tmp_path)
+        pages_text = []
+        num_pages = len(doc)
+        for i, page in enumerate(doc):
+            raw = page.get_text()
+            clean = re.sub(r'\b\d{12}\b', '[UAN-REDACTED]', raw)
+            clean = re.sub(r'\b\d{10}\b', '[MOBILE-REDACTED]', clean)
+            pages_text.append(f"=== PAGE {i+1} ===\n{clean[:2000]}")
+        doc.close()   # must close before unlink on Windows
+        return {"pages": num_pages, "text_preview": "\n".join(pages_text[:3])}
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass  # ignore if already deleted
+
+
+@app.post("/api/import-epf")
+async def import_epf(file: UploadFile = File(...), db: Session = Depends(get_session)):
+    """Import an EPFO Member Passbook PDF.
+
+    Only financial transaction data is extracted — UAN, Member ID, Name,
+    DOB, mobile and establishment details are never stored.
+    The PDF must be unlocked (save a password-free copy if needed).
+    """
+    content = await file.read()
+    import tempfile, os
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+    try:
+        result = import_epf_passbook(db, tmp_path)
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+    return JSONResponse(result)
+
+
+@app.get("/api/epf")
+def list_epf(db: Session = Depends(get_session)):
+    rows = db.execute(select(EPFEntry).order_by(EPFEntry.month)).scalars().all()
+    return [{
+        "id": r.id, "entry_type": r.entry_type,
+        "month": r.month.isoformat(),
+        "employee_share": r.employee_share, "employer_share": r.employer_share,
+        "pension_contrib": r.pension_contrib,
+        "employee_withdrawal": r.employee_withdrawal,
+        "employer_withdrawal": r.employer_withdrawal,
+    } for r in rows]
+
+
+@app.delete("/api/epf/{epf_id}")
+def delete_epf(epf_id: int, db: Session = Depends(get_session)):
+    row = db.get(EPFEntry, epf_id)
+    if not row:
+        raise HTTPException(404, "Not found")
+    db.delete(row)
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/epf/summary")
+def epf_summary(db: Session = Depends(get_session)):
+    """Current EPF balance and year-wise breakdown."""
+    rows = db.execute(select(EPFEntry).order_by(EPFEntry.month)).scalars().all()
+    today = date.today()
+    fy_year = today.year if today.month >= 4 else today.year - 1
+    fy_start = date(fy_year, 4, 1)
+
+    total_emp  = sum(r.employee_share - r.employee_withdrawal for r in rows)
+    total_empr = sum(r.employer_share - r.employer_withdrawal for r in rows)
+    total_int  = sum(r.employee_share + r.employer_share for r in rows
+                     if r.entry_type == "interest")
+    total_pension = sum(r.pension_contrib for r in rows)
+    balance    = total_emp + total_empr  # interest already included in contribution rows
+
+    fy_emp  = sum(r.employee_share for r in rows
+                  if r.entry_type == "contribution" and r.month >= fy_start)
+    fy_empr = sum(r.employer_share for r in rows
+                  if r.entry_type == "contribution" and r.month >= fy_start)
+
+    # Monthly timeline for chart
+    monthly = [
+        {"month": r.month.isoformat(), "entry_type": r.entry_type,
+         "employee": r.employee_share, "employer": r.employer_share,
+         "pension": r.pension_contrib}
+        for r in rows if r.entry_type == "contribution"
+    ]
+
+    return {
+        "total_employee_contributions": round(total_emp, 2),
+        "total_employer_contributions": round(total_empr, 2),
+        "total_interest_credited":      round(total_int, 2),
+        "total_pension_contributions":  round(total_pension, 2),
+        "estimated_balance":            round(balance, 2),
+        "fy_employee_contribution":     round(fy_emp, 2),
+        "fy_employer_contribution":     round(fy_empr, 2),
+        "months_imported":              len([r for r in rows if r.entry_type == "contribution"]),
+        "monthly_contributions":        monthly,
+        "as_of": today.isoformat(),
+    }
+
+
 @app.post("/api/import-cas")
 async def import_cas(file: UploadFile = File(...), db: Session = Depends(get_session)):
     """Import a CAMS+KFintech Combined CAS PDF (Consolidated Account Statement).
@@ -191,7 +325,10 @@ async def import_cas(file: UploadFile = File(...), db: Session = Depends(get_ses
     try:
         result = import_cas_pdf(db, tmp_path)
     finally:
-        os.unlink(tmp_path)
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
     return JSONResponse(result)
 
 
@@ -364,6 +501,339 @@ def data_quality(db: Session = Depends(get_session)):
         ) if orphans else "No data quality issues found.",
         "orphans": orphans,
     }
+
+
+@app.get("/api/instrument-categories")
+def get_instrument_categories(db: Session = Depends(get_session)):
+    """List all instruments with their current and auto-detected category."""
+    ensure_all_categorised(db)
+    insts = db.execute(select(Instrument)).scalars().all()
+    return [{
+        "isin": i.isin, "symbol": i.symbol, "name": i.name or i.symbol,
+        "segment": i.segment, "category": i.asset_category,
+        "auto_detected": auto_detect_category(i.isin, i.symbol, i.name, i.segment),
+    } for i in sorted(insts, key=lambda x: x.symbol or "")]
+
+
+@app.patch("/api/instrument-categories/{isin}")
+def update_instrument_category(isin: str, payload: dict,
+                                db: Session = Depends(get_session)):
+    inst = db.get(Instrument, isin)
+    if not inst:
+        raise HTTPException(404, "Instrument not found")
+    valid = {"equity", "debt", "gold", "hybrid", "cash", "silver", "epf", "other"}
+    cat = str(payload.get("category", "")).lower()
+    if cat not in valid:
+        raise HTTPException(400, f"category must be one of: {sorted(valid)}")
+    inst.asset_category = cat
+    db.commit()
+    return {"isin": isin, "category": cat}
+
+
+@app.post("/api/instrument-categories/auto-detect")
+def auto_detect_all_categories(db: Session = Depends(get_session)):
+    """Re-run auto-detection for all instruments (overwrites existing categories)."""
+    insts = db.execute(select(Instrument)).scalars().all()
+    for inst in insts:
+        inst.asset_category = auto_detect_category(
+            inst.isin, inst.symbol, inst.name, inst.segment)
+    db.commit()
+    return {"updated": len(insts)}
+
+
+@app.post("/api/import-global")
+async def import_global_equity(file: UploadFile = File(...),
+                                db: Session = Depends(get_session)):
+    """Import INDMoney Global Equity XLS/XLSX order book."""
+    import tempfile, os
+    content = await file.read()
+    suffix = Path(file.filename or "upload.xls").suffix or ".xls"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+    try:
+        result = import_indmoney_global(db, tmp_path)
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+    return JSONResponse(result)
+
+
+@app.get("/api/global-equity")
+def list_global_equity(db: Session = Depends(get_session)):
+    rows = db.execute(
+        select(GlobalEquityTransaction).order_by(
+            GlobalEquityTransaction.trade_date.desc(),
+            GlobalEquityTransaction.id.desc()
+        )
+    ).scalars().all()
+    return [{
+        "id": r.id, "stock_name": r.stock_name, "symbol": r.symbol,
+        "trade_date": r.trade_date.isoformat(),
+        "trade_type": r.trade_type, "quantity": r.quantity,
+        "price_usd": r.price_usd, "amount_usd": r.amount_usd,
+        "fees_usd": r.fees_usd, "exchange_rate": r.exchange_rate,
+        "amount_inr": round(r.amount_usd * r.exchange_rate, 2)
+                      if r.exchange_rate else None,
+        "source": r.source,
+    } for r in rows]
+
+
+class GlobalTxnIn(BaseModel):
+    symbol:         str
+    stock_name:     str | None = None
+    trade_date:     date
+    trade_type:     str = Field(pattern="^(buy|sell)$")
+    quantity:       float = Field(gt=0)
+    price_usd:      float = Field(gt=0)
+    fees_usd:       float = 0.0
+    exchange_rate:  float | None = None   # USD/INR; fetched automatically if None
+    notes:          str | None = None
+
+
+@app.post("/api/global-equity")
+def create_global_txn(payload: GlobalTxnIn, db: Session = Depends(get_session)):
+    rate = payload.exchange_rate
+    if rate is None:
+        from .global_equity_importer import _fetch_usdinr
+        rates = _fetch_usdinr({payload.trade_date})
+        rate = rates.get(payload.trade_date)
+    txn = GlobalEquityTransaction(
+        symbol=payload.symbol.upper().strip(),
+        stock_name=payload.stock_name,
+        trade_date=payload.trade_date,
+        trade_type=payload.trade_type,
+        quantity=payload.quantity,
+        price_usd=payload.price_usd,
+        amount_usd=payload.quantity * payload.price_usd,
+        fees_usd=payload.fees_usd,
+        exchange_rate=rate,
+        notes=payload.notes,
+        source="manual",
+    )
+    db.add(txn)
+    db.commit()
+    db.refresh(txn)
+    return {"id": txn.id, "symbol": txn.symbol, "exchange_rate": rate}
+
+
+@app.delete("/api/global-equity/{txn_id}")
+def delete_global_txn(txn_id: int, db: Session = Depends(get_session)):
+    r = db.get(GlobalEquityTransaction, txn_id)
+    if not r:
+        raise HTTPException(404, "Not found")
+    db.delete(r)
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/global-equity/xirr")
+def global_xirr(db: Session = Depends(get_session)):
+    return compute_global_xirr(db)
+
+
+@app.get("/api/global-equity/equity-curve")
+def global_equity_curve(db: Session = Depends(get_session)):
+    return compute_global_equity_curve(db)
+
+
+@app.get("/api/global-equity/tax")
+def global_tax(db: Session = Depends(get_session)):
+    return compute_global_tax(db)
+
+
+@app.get("/api/global-equity/summary")
+def global_equity_summary(db: Session = Depends(get_session)):
+    """Current holdings, P&L in USD and INR, live prices from yfinance."""
+    import yfinance as yf
+    from collections import defaultdict
+    from datetime import date as date_cls
+
+    today = date_cls.today()
+    rows = db.execute(select(GlobalEquityTransaction).order_by(
+        GlobalEquityTransaction.trade_date, GlobalEquityTransaction.id)
+    ).scalars().all()
+
+    if not rows:
+        return {"holdings": [], "total_usd": 0, "total_inr": 0,
+                "invested_usd": 0, "invested_inr": 0, "usdinr": None}
+
+    # Compute holdings (weighted avg, fractional)
+    qty_map:   dict[str, float] = defaultdict(float)
+    cost_map:  dict[str, float] = defaultdict(float)   # total cost USD
+    name_map:  dict[str, str]   = {}
+    txns_map:  dict[str, list]  = defaultdict(list)
+
+    for r in rows:
+        sym = r.symbol
+        name_map[sym] = r.stock_name or sym
+        txns_map[sym].append(r)
+        if r.trade_type == "buy":
+            cost_map[sym]  += r.amount_usd + r.fees_usd
+            qty_map[sym]   += r.quantity
+        else:
+            sell_qty        = min(r.quantity, qty_map[sym])
+            if qty_map[sym] > 0:
+                cost_map[sym] -= (sell_qty / qty_map[sym]) * cost_map[sym]
+            qty_map[sym]   -= sell_qty
+            if qty_map[sym] < 1e-9:
+                qty_map[sym], cost_map[sym] = 0.0, 0.0
+
+    # Fetch live USD/INR
+    try:
+        fx = yf.Ticker("USDINR=X").history(period="5d")
+        usdinr = float(fx["Close"].iloc[-1]) if not fx.empty else 84.0
+    except Exception:
+        usdinr = 84.0
+
+    # Fetch live prices for held symbols
+    held = [s for s, q in qty_map.items() if q > 1e-6]
+    prices: dict[str, float] = {}
+    if held:
+        try:
+            tickers = yf.download(held, period="5d", auto_adjust=True,
+                                   progress=False)["Close"]
+            if hasattr(tickers, "iloc"):
+                for sym in held:
+                    col = tickers[sym] if sym in tickers.columns else tickers
+                    prices[sym] = float(col.dropna().iloc[-1])
+        except Exception:
+            pass
+
+    holdings = []
+    total_val_usd = 0.0
+    total_cost_usd = 0.0
+
+    for sym in sorted(qty_map):
+        qty = qty_map[sym]
+        cost = cost_map[sym]
+        if qty < 1e-6 and cost < 0.01:
+            # Fully exited
+            from .xirr import xirr as compute_xirr
+            flows = []
+            for t in txns_map[sym]:
+                amt = (t.amount_usd + t.fees_usd) * (1 if t.trade_type == "buy" else -1)
+                flows.append((t.trade_date, -amt if t.trade_type == "buy" else abs(amt) - t.fees_usd))
+            realized_pnl = sum(a for _, a in flows)
+            holdings.append({
+                "symbol": sym, "name": name_map[sym],
+                "quantity": 0, "avg_cost_usd": 0,
+                "current_price_usd": prices.get(sym),
+                "invested_usd": 0, "current_value_usd": 0,
+                "realized_pnl_usd": round(realized_pnl, 4),
+                "unrealized_pnl_usd": 0,
+                "status": "closed",
+            })
+            continue
+
+        avg_cost = cost / qty if qty > 0 else 0
+        cur_price = prices.get(sym, 0)
+        cur_value = qty * cur_price
+        total_val_usd  += cur_value
+        total_cost_usd += cost
+
+        holdings.append({
+            "symbol": sym, "name": name_map[sym],
+            "quantity": round(qty, 8),
+            "avg_cost_usd": round(avg_cost, 4),
+            "current_price_usd": round(cur_price, 4) if cur_price else None,
+            "invested_usd": round(cost, 4),
+            "current_value_usd": round(cur_value, 4) if cur_price else None,
+            "current_value_inr": round(cur_value * usdinr, 2) if cur_price else None,
+            "invested_inr": round(cost * usdinr, 2),
+            "unrealized_pnl_usd": round(cur_value - cost, 4) if cur_price else None,
+            "unrealized_pnl_inr": round((cur_value - cost) * usdinr, 2) if cur_price else None,
+            "pct_return": round((cur_value - cost) / cost * 100, 2) if cost > 0 and cur_price else None,
+            "status": "active",
+        })
+
+    return {
+        "holdings":      sorted(holdings, key=lambda h: h.get("current_value_usd") or 0, reverse=True),
+        "total_usd":     round(total_val_usd, 2),
+        "total_inr":     round(total_val_usd * usdinr, 2),
+        "invested_usd":  round(total_cost_usd, 2),
+        "invested_inr":  round(total_cost_usd * usdinr, 2),
+        "usdinr":        round(usdinr, 2),
+        "as_of":         today.isoformat(),
+    }
+
+
+@app.get("/api/bonds")
+def list_bonds(db: Session = Depends(get_session)):
+    return compute_bond_holdings(db)
+
+
+@app.get("/api/bonds/details")
+def list_bond_details(db: Session = Depends(get_session)):
+    rows = db.execute(select(BondDetail).order_by(BondDetail.symbol)).scalars().all()
+    return [{
+        "id": b.id, "symbol": b.symbol, "isin": b.isin,
+        "bond_type": b.bond_type, "full_name": b.full_name,
+        "issue_price": b.issue_price, "issue_date": b.issue_date.isoformat(),
+        "maturity_date": b.maturity_date.isoformat(),
+        "coupon_rate": b.coupon_rate, "coupon_frequency": b.coupon_frequency,
+        "capital_gains_exempt_at_maturity": b.capital_gains_exempt_at_maturity,
+        "notes": b.notes,
+    } for b in rows]
+
+
+class BondDetailIn(BaseModel):
+    symbol:           str
+    isin:             str | None = None
+    bond_type:        str = "SGB"
+    full_name:        str | None = None
+    issue_price:      float = Field(gt=0)
+    issue_date:       date
+    maturity_date:    date
+    coupon_rate:      float = 0.0
+    coupon_frequency: str = "semi-annual"
+    capital_gains_exempt_at_maturity: bool = False
+    quantity:         float = 0.0
+    purchase_price:   float | None = None
+    purchase_date:    date | None = None
+    price_override:   float | None = None   # manual current price (overrides auto-fetch)
+    notes:            str | None = None
+
+
+@app.post("/api/bonds/details")
+def create_bond_detail(payload: BondDetailIn, db: Session = Depends(get_session)):
+    existing = db.execute(
+        select(BondDetail).where(BondDetail.symbol == payload.symbol.upper())
+    ).scalar_one_or_none()
+    if existing:
+        for k, v in payload.model_dump().items():
+            if k == "symbol":
+                continue
+            setattr(existing, k, v)
+        db.commit()
+        return {"updated": True, "symbol": existing.symbol}
+    bd = BondDetail(symbol=payload.symbol.upper().strip(), **{
+        k: v for k, v in payload.model_dump().items() if k != "symbol"
+    })
+    db.add(bd)
+    db.commit()
+    return {"created": True, "symbol": bd.symbol}
+
+
+@app.delete("/api/bonds/details/{bond_id}")
+def delete_bond_detail(bond_id: int, db: Session = Depends(get_session)):
+    b = db.get(BondDetail, bond_id)
+    if not b:
+        raise HTTPException(404, "Not found")
+    db.delete(b)
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/networth")
+def networth(db: Session = Depends(get_session)):
+    """Total net worth across Equity, MF, Fixed Income, and EPF.
+    Includes historical monthly series, 36-month projection, and milestone dates.
+    Uses cached prices only for historical data — no live API calls.
+    """
+    return compute_networth(db)
 
 
 @app.get("/api/debug/cashflows")

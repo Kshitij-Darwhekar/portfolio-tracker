@@ -204,11 +204,40 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 | Version | Date | Highlights |
 |---|---|---|
+| **0.4.0** | 2026-06-01 | EPF passbook import, Global Equities (INDMoney), Bonds/SGB, Net Worth dashboard, asset class categorisation |
 | **0.3.0** | 2026-05-31 | Fixed Income (FDs & RDs): interest math, TDS, growth curve, maturity timeline, favicon |
 | **0.2.2** | 2026-05-31 | Fix XIRR correctness regression from cache_only over-application |
 | **0.2.1** | 2026-05-31 | Performance: 220× faster holdings, 37× faster equity curve, two-phase loading |
 | **0.2.0** | 2026-05-31 | Mutual Funds (CAS import), segment filter, XIRR by period, STCG/LTCG P&L, collapsible UI |
 | **0.1.0** | 2026-05-31 | Initial release: equity tracking, corporate actions, XIRR vs benchmarks |
+
+---
+
+### EPF
+- **EPFO Member Passbook PDF import** — handles CAMS+KFintech format including page-break splits; PII (UAN, Member ID, Name) never stored
+- Balance breakdown: employee vs employer contributions, EPS pension, interest credited
+- Monthly contribution chart, year-wise interest, balance growth curve, contribution ledger
+
+### Global Equities
+- **INDMoney/Alpaca XLS importer** — fractional US shares, USD amounts, auto-fetches historical USD/INR rates
+- P&L shown in both USD and INR; live prices from yfinance (US tickers)
+- XIRR vs S&P 500 and NASDAQ 100 (same cashflow-replay benchmark method as Indian equity)
+- Equity curve: portfolio vs US indices
+- **Indian tax analysis**: STCG (< 24 months, slab rate) / LTCG (≥ 24 months, 12.5%, **no ₹1.25L exemption** for foreign equity); lot-by-lot breakdown with INR P&L using historical exchange rates
+
+### Bonds (SGBs, corporate bonds, G-Secs)
+- Self-contained — position tracked in bond metadata, no equity tradebook entry needed
+- SGB pricing: live gold proxy via GOLDBEES × 100; manual price override for NSE/RBI price
+- Interest schedule: configurable coupon rate, semi-annual/annual/quarterly, next coupon date and amount
+- **Tax treatment**: SGB capital gains at RBI maturity = TAX EXEMPT (Section 47(viic)); interest taxable at slab rate
+- SGBDE31III pre-seeded (ISIN IN0020230168, ₹6,149 issue price, 2.5% coupon, Dec 2031 maturity)
+
+### Net Worth Dashboard
+- Headline total across all asset classes (Equity + MF + FI + EPF + Bonds + Global)
+- Two views: **By Account** and **By Asset Class** (Equity | Debt | Gold | Hybrid | Silver)
+- Asset class logic: EPF → Debt; Cash/Liquid funds → Debt; SGBs/Gold ETFs → Gold
+- 36-month projected net worth with milestone markers (₹50K → ₹1Cr)
+- Per-instrument category override via "Edit categories" in XIRR Analysis section
 
 ---
 
