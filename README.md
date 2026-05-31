@@ -190,6 +190,18 @@ The **Refresh prices** button force-fetches today's closes for all held instrume
 
 ---
 
+## Version history
+
+See [CHANGELOG.md](CHANGELOG.md) for the full version history.
+
+| Version | Date | Highlights |
+|---|---|---|
+| **0.2.1** | 2026-05-31 | Performance: 220× faster holdings, 37× faster equity curve, two-phase loading |
+| **0.2.0** | 2026-05-31 | Mutual Funds (CAS import), segment filter, XIRR by period, STCG/LTCG P&L, collapsible UI |
+| **0.1.0** | 2026-05-31 | Initial release: equity tracking, corporate actions, XIRR vs benchmarks |
+
+---
+
 ## Known limitations
 
 - No auth — run behind a VPN or reverse-proxy auth layer

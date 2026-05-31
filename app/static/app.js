@@ -44,8 +44,8 @@ document.querySelectorAll(".seg-btn").forEach((btn) => {
     if (folioTh) folioTh.style.display = activeSegment === "MF" ? "" : "none";
     if (symTh)   symTh.textContent     = activeSegment === "MF" ? "Scheme" : "Symbol";
 
-    // Refresh everything with the new segment
-    refreshAll();
+    // On tab switch: skip management panels (transactions/CAs/aliases don't change)
+    refreshAll(true);
   });
 });
 
@@ -450,7 +450,12 @@ async function loadTransactions() {
 }
 
 async function loadEquityCurve() {
-  const data = await api(segQS("/api/equity-curve"));
+  // Show a subtle loading state on the chart container
+  const container = document.querySelector(".chart-container");
+  if (container) container.style.opacity = "0.4";
+  const data = await api(segQS("/api/equity-curve")).finally(() => {
+    if (container) container.style.opacity = "1";
+  });
   if (data.base_date) {
     document.getElementById("curve-subtitle").textContent =
       `All series rebased to 100 on ${data.base_date} (your first transaction). ` +
@@ -819,15 +824,29 @@ document.querySelector("#alias-table tbody").addEventListener("click", async (e)
   }
 });
 
-async function refreshAll() {
+async function refreshAll(tabSwitch = false) {
   const realizedPeriod = document.getElementById("realized-period-select").value;
-  const xirrPeriod = document.getElementById("xirr-period-select").value;
-  await Promise.all([
-    loadSummary(), loadHoldings(), loadTransactions(), loadEquityCurve(),
-    loadCorporateActions(), loadSymbolAliases(),
-    loadDataQuality(), loadRealizedPnl(realizedPeriod),
+  const xirrPeriod    = document.getElementById("xirr-period-select").value;
+
+  // Phase 1 — fast (DB-only, no price fetching): render immediately
+  const phase1 = [
+    loadSummary(),
+    loadHoldings(),
+    loadRealizedPnl(realizedPeriod),
+    loadDataQuality(),
+  ];
+  // Management panels don't change on tab switch — skip them for speed
+  if (!tabSwitch) {
+    phase1.push(loadTransactions(), loadCorporateActions(), loadSymbolAliases());
+  }
+  await Promise.all(phase1);
+
+  // Phase 2 — slow (equity curve + full XIRR): fire and forget so the page is
+  // already usable. A loading indicator is shown while they compute.
+  Promise.all([
+    loadEquityCurve(),
     loadXirrAnalysis(xirrPeriod),
-  ]);
+  ]).catch(console.error);
 }
 
 // Keyboard shortcuts

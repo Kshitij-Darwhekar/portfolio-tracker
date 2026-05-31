@@ -126,7 +126,7 @@ def compute_holdings(db: Session, today: date | None = None, segment: str | None
         cur_value = None
         if qty > 0 and inst is not None:
             try:
-                cur_price = latest_close(db, inst, today)
+                cur_price = latest_close(db, inst, today, cache_only=True)
             except Exception:
                 cur_price = None
             if cur_price is not None:
@@ -275,7 +275,7 @@ def compute_period_xirr(
     start_date = first_txn_date
 
     for ticker, name in BENCHMARKS.items():
-        series = fetch_benchmark_series(db, ticker, start_date, today)
+        series = fetch_benchmark_series(db, ticker, start_date, today, cache_only=True)
         if not series:
             bench_results[ticker] = {"name": name, "xirr": None}
             continue
@@ -585,7 +585,7 @@ def compute_summary(db: Session, today: date | None = None, segment: str | None 
     if txns:
         start_date = min(t.trade_date for t in txns)
         for ticker, name in BENCHMARKS.items():
-            series = fetch_benchmark_series(db, ticker, start_date, today)
+            series = fetch_benchmark_series(db, ticker, start_date, today, cache_only=True)
             if not series:
                 bench[ticker] = {"name": name, "xirr": None, "current_value": None}
                 continue
@@ -684,11 +684,33 @@ def compute_equity_curve(
         sym = first.symbol.upper()
         split_actions = get_split_actions(db, sym)
 
-        # qty over time — uses split-adjusted qty so chart value matches current holdings
+        # qty over time: single O(days + events) sweep instead of O(days × events).
+        # Build a chronological event list (buys before sells on same day, splits last).
         qty_by_day: dict[date, float] = {}
+        all_ev: list[tuple] = []
+        for t in sorted(group, key=lambda t: (t.trade_date, t.id)):
+            all_ev.append((t.trade_date, 0 if t.trade_type == "buy" else 1, t))
+        for ex_d, act_type, ratio in split_actions:
+            all_ev.append((ex_d, 2, (act_type, ratio)))
+        all_ev.sort(key=lambda x: (x[0], x[1]))
+
+        running = 0.0
+        ev_idx = 0
         d = start
         while d <= today:
-            qty_by_day[d] = qty_held_on(group, split_actions, d)
+            while ev_idx < len(all_ev) and all_ev[ev_idx][0] <= d:
+                _, kind, payload = all_ev[ev_idx]
+                if kind == 0:           # buy
+                    running += payload.quantity
+                elif kind == 1:         # sell
+                    running = max(0.0, running - payload.quantity)
+                else:                   # split / demerger
+                    act_type, ratio = payload
+                    if act_type != "demerger":
+                        running = float(int(running * ratio))
+                    # demerger: qty unchanged (only cost basis changes)
+                ev_idx += 1
+            qty_by_day[d] = max(0.0, running)
             d += timedelta(days=1)
         qty_series[k] = qty_by_day
 
@@ -696,7 +718,7 @@ def compute_equity_curve(
             close_series[k] = {}
             continue
         try:
-            raw = get_close_series(db, inst, start, today)
+            raw = get_close_series(db, inst, start, today, cache_only=True)
         except Exception:
             raw = {}
         close_series[k] = fill_forward(raw, start, today)
@@ -725,7 +747,7 @@ def compute_equity_curve(
     for ticker in bench_to_use:
         if ticker not in BENCHMARKS:
             continue
-        raw = fetch_benchmark_series(db, ticker, start, today)
+        raw = fetch_benchmark_series(db, ticker, start, today, cache_only=True)
         if not raw:
             continue
         ff = fill_forward(raw, start, today)

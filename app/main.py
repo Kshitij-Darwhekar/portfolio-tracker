@@ -223,9 +223,56 @@ def list_benchmarks():
 
 @app.post("/api/refresh-prices")
 def refresh_prices(db: Session = Depends(get_session)):
-    """Force a recompute by recomputing summary (which lazily refetches today)."""
+    """Warm the price cache for all held instruments + benchmarks.
+
+    Uses live API calls (cache_only=False) so subsequent analytics queries
+    can run fully from cache and respond in milliseconds.
+    """
+    from datetime import date as date_cls, timedelta
+    from .prices import (
+        get_close_series, fetch_benchmark_series, BENCHMARKS,
+        get_or_create_instrument, latest_close,
+    )
+    from sqlalchemy import select as sa_select
+
+    today = date_cls.today()
+    txns = db.execute(sa_select(Transaction)).scalars().all()
+    if not txns:
+        return {"ok": True, "as_of": today.isoformat(), "instruments_refreshed": 0}
+
+    # Get all unique instruments
+    from collections import defaultdict
+    bucket = defaultdict(list)
+    for t in txns:
+        bucket[f"{t.segment}:{t.symbol.upper()}"].append(t)
+
+    start = min(t.trade_date for t in txns)
+    refreshed = 0
+    for _key, group in bucket.items():
+        first = group[0]
+        best_isin = next((t.isin for t in group if t.isin), None)
+        inst = get_or_create_instrument(
+            db, symbol=first.symbol, isin=best_isin,
+            segment=first.segment, exchange=first.exchange,
+        )
+        if inst:
+            try:
+                get_close_series(db, inst, start, today, cache_only=False)
+                refreshed += 1
+            except Exception:
+                pass
+
+    # Refresh benchmark series
+    for ticker in BENCHMARKS:
+        try:
+            fetch_benchmark_series(db, ticker, start, today, cache_only=False)
+        except Exception:
+            pass
+
+    db.commit()
     s = compute_summary(db)
-    return {"ok": True, "as_of": s["as_of"], "current_value": s["current_value"]}
+    return {"ok": True, "as_of": s["as_of"], "current_value": s["current_value"],
+            "instruments_refreshed": refreshed}
 
 
 @app.get("/api/xirr-analysis")

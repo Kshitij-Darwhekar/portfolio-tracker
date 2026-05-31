@@ -1,0 +1,71 @@
+# Changelog
+
+All notable changes to this project are documented here.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+
+---
+
+## [0.2.1] — 2026-05-31
+
+### Performance
+- **220× faster holdings** — analytics now read price_cache from SQLite only; live API calls (yfinance, AMFI) restricted to "Refresh prices" button
+- **37× faster equity curve** — replaced per-day `qty_held_on()` calls (O(days × transactions)) with a single chronological event sweep (O(days + transactions))
+- **Two-phase frontend loading** — summary cards and holdings table render in ~200ms; equity curve and XIRR analysis load in the background without blocking the page
+- **Smarter tab switching** — switching between All / Equities / MF tabs skips reloading management panels (Transactions, Corporate Actions, Symbol Renames) that don't change on segment switch
+
+### Changed
+- `refresh-prices` endpoint now explicitly pre-warms the full price-cache date range for every held instrument and all four benchmark series, so the first post-refresh page load is fast
+- Equity curve shows a subtle opacity fade while loading in the background
+
+---
+
+## [0.2.0] — 2026-05-31
+
+### Added
+- **Mutual Fund section** — CAS PDF importer for CAMS + KFintech Combined Consolidated Account Statement (full history from folio inception)
+  - Handles: SIP, lumpsum purchases, switch-in/out, redemptions
+  - Auto-skips stamp duty lines (0.005% entries) and administrative events
+  - Deduplication by `CAS|folio|date|nav|units` — safe to re-import
+  - Displays full scheme names (e.g. "Parag Parikh Flexi Cap Fund - Regular Plan Growth") + folio number
+- **Portfolio filter tabs** — All | Equities | Mutual Funds; every panel responds (summary, holdings, XIRR, realized P&L, equity curve)
+- **XIRR Analysis section** with period selector: All-time | 1Y | 3Y | 5Y | Current FY | last 4 FYs | Custom date range
+- **Realized P&L with STCG/LTCG split** — same period selector; STCG (< 12 months, 20%) and LTCG (≥ 12 months, 12.5% above ₹1.25L) for Indian tax planning
+- **Subperiod XIRR** — uses opening portfolio value as carry-in cashflow and closing value as terminal, correctly isolating a year without distortion from other periods
+- **Data quality warnings** — detects orphan sells (IPO allotments without matching buy) and surfaces them with total missing proceeds
+- **Collapsible sections** — every card has a ▲/▼ toggle; state saved in localStorage; management sections (Corporate Actions, Symbol Renames, Transactions) collapsed by default
+- **Holdings quick-filter** — type a symbol to instantly filter the holdings table
+- **Indian number formatting** — ₹1.52L, ₹10.5Cr instead of raw digits
+- **Keyboard shortcuts** — `N` = Add transaction, `R` = Refresh prices, `/` = Focus holdings filter
+- **Sticky header** — Refresh prices button stays visible while scrolling
+- `folio` column added to transactions table (auto-migrated on startup)
+
+### Fixed
+- **Benchmark XIRR simulation** — sell side now uses the index position's actual value at the sell date, not the stock's sell price; this prevented IPO windfalls from artificially inflating benchmark XIRRs
+- **Subperiod XIRR terminal value** — was using unfiltered holdings (EQ + MF together) even when a segment filter was active, causing inflated XIRRs (e.g. 90% instead of 24% for equities)
+
+### Changed
+- Summary cards split into Invested | Current Value | Unrealized P&L | Realized P&L | Total P&L (unrealized is directly comparable to Zerodha's portfolio widget)
+- Equity curve subtitle now shows the actual base date and explains what a value of 200 means
+- Default-collapsed: Corporate Actions, Symbol Renames, Transactions sections
+
+---
+
+## [0.1.0] — 2026-05-31
+
+### Added
+- **Zerodha tradebook import** — CSV and XLSX, auto-detects separator and encoding (including BOM), deduplicates by `trade_id`
+- **Manual transaction entry** — add/edit/delete buy and sell transactions via a modal form
+- **Live prices** — yfinance for NSE (`.NS`) with `.BO` BSE fallback; AMFI NAVAll.txt + mfapi.in for mutual funds and ETFs yfinance can't resolve
+- **Holdings table** — qty, avg cost (split-adjusted), current price, invested, current value, P&L, % return, per-holding XIRR; sortable by every column
+- **Corporate actions** — splits, bonuses, dividends, mergers, demergers; auto-sync from yfinance; fractional share payouts tracked in XIRR
+  - Demerger type adjusts cost basis only (no qty change) — used for ITC Hotels spin-off from ITC
+  - Correct chronological event replay: buys processed before sells on the same day (handles intraday trades correctly)
+- **Symbol renames** — built-in map (ZOMATO → ETERNAL, GOLDETFADD → GOLDADD) + user-defined aliases persisted to `data/symbol_aliases.json`
+- **Orphan sell detector** — identifies IPO allotment sells missing a matching buy
+- **Portfolio XIRR** vs four benchmarks (NIFTY 50, NIFTY 500, NIFTY Midcap 150, NIFTY Smallcap 250) using correct cashflow-replay method
+- **Equity curve** — portfolio vs benchmarks, rebased to 100 at first transaction date on the same cash-deployment schedule
+- **XIRR solver** — `scipy.optimize.brentq` over [−99%, 10000%] with Newton-Raphson fallback
+- **CSV export** of all transactions
+- **Docker + docker-compose** — `./data` volume mounted for SQLite persistence across rebuilds
+- **nginx reverse proxy snippet** for VPS HTTPS deployment
+- SQLite with daily price cache — no external database required

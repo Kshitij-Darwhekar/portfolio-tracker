@@ -269,12 +269,13 @@ def _cache_put(db: Session, key: str, series: dict[date, float]) -> None:
 
 
 def get_close_series(
-    db: Session, inst: Instrument, start: date, end: date
+    db: Session, inst: Instrument, start: date, end: date, cache_only: bool = False
 ) -> dict[date, float]:
     """Return {date: close} between [start, end] inclusive, using cache when possible.
 
-    On cache miss for any subrange, refetches the entire [start, end] range and
-    upserts it. Simple and good enough for this scale.
+    cache_only=True: return only what is already in the DB; never call external APIs.
+    This is used by analytics functions so they don't block on network calls.
+    Live fetches only happen during explicit "Refresh prices" requests.
     """
     key = _cache_key(inst)
     if not key:
@@ -286,6 +287,17 @@ def get_close_series(
 
     if have_start and have_end:
         # Pull the whole range from cache
+        rows = db.execute(
+            select(PriceCache.on_date, PriceCache.close).where(
+                PriceCache.key == key,
+                PriceCache.on_date >= start,
+                PriceCache.on_date <= end,
+            )
+        ).all()
+        return {r.on_date: r.close for r in rows}
+
+    if cache_only:
+        # Return whatever partial data we have — no API calls
         rows = db.execute(
             select(PriceCache.on_date, PriceCache.close).where(
                 PriceCache.key == key,
@@ -349,9 +361,13 @@ def get_close_series(
     return series
 
 
-def latest_close(db: Session, inst: Instrument, on_or_before: date) -> float | None:
-    """Most recent close ≤ given date. Pulls last 30 days if cache cold."""
-    series = get_close_series(db, inst, on_or_before - timedelta(days=30), on_or_before)
+def latest_close(
+    db: Session, inst: Instrument, on_or_before: date, cache_only: bool = False
+) -> float | None:
+    """Most recent close ≤ given date."""
+    series = get_close_series(
+        db, inst, on_or_before - timedelta(days=30), on_or_before, cache_only=cache_only
+    )
     if not series:
         return None
     eligible = [d for d in series if d <= on_or_before]
@@ -399,11 +415,21 @@ BENCHMARK_FALLBACKS: dict[str, list[str]] = {
 
 
 def fetch_benchmark_series(
-    db: Session, ticker: str, start: date, end: date
+    db: Session, ticker: str, start: date, end: date, cache_only: bool = False
 ) -> dict[date, float]:
     """Cache + fetch a benchmark equity index from yfinance, with fallbacks."""
     have = _cache_get(db, ticker, [start, end])
     if len(have) == 2:
+        rows = db.execute(
+            select(PriceCache.on_date, PriceCache.close).where(
+                PriceCache.key == ticker,
+                PriceCache.on_date >= start,
+                PriceCache.on_date <= end,
+            )
+        ).all()
+        return {r.on_date: r.close for r in rows}
+
+    if cache_only:
         rows = db.execute(
             select(PriceCache.on_date, PriceCache.close).where(
                 PriceCache.key == ticker,
@@ -419,7 +445,7 @@ def fetch_benchmark_series(
         if series:
             if cand != ticker:
                 log.info("Benchmark %s: using fallback ticker %s", ticker, cand)
-            _cache_put(db, ticker, series)  # cache under the requested key
+            _cache_put(db, ticker, series)
             db.commit()
             return series
     return {}
