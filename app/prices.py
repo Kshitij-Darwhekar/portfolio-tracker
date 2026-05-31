@@ -364,9 +364,38 @@ def get_close_series(
 def latest_close(
     db: Session, inst: Instrument, on_or_before: date, cache_only: bool = False
 ) -> float | None:
-    """Most recent close ≤ given date."""
+    """Most recent close ≤ given date.
+
+    Fast path: single SQL query for the most recent cached row within 14 days.
+    This avoids the have_start/have_end two-point probe in get_close_series,
+    which triggers a full history download when even one boundary date is missing
+    (e.g. start date was a weekend with no market data).
+
+    Slow path (cache miss): fetches only the last 30 days, not full history.
+    """
+    from sqlalchemy import desc as sa_desc
+
+    key = _cache_key(inst)
+    if not key:
+        return None
+
+    # Direct single-row query — no boundary probing, no range scan
+    row = db.execute(
+        select(PriceCache.close).where(
+            PriceCache.key == key,
+            PriceCache.on_date >= on_or_before - timedelta(days=14),
+            PriceCache.on_date <= on_or_before,
+        ).order_by(sa_desc(PriceCache.on_date)).limit(1)
+    ).scalar()
+    if row is not None:
+        return float(row)
+
+    if cache_only:
+        return None
+
+    # Cache miss — fetch only the last 30 days (not full history)
     series = get_close_series(
-        db, inst, on_or_before - timedelta(days=30), on_or_before, cache_only=cache_only
+        db, inst, on_or_before - timedelta(days=30), on_or_before, cache_only=False
     )
     if not series:
         return None

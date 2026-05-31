@@ -126,7 +126,10 @@ def compute_holdings(db: Session, today: date | None = None, segment: str | None
         cur_value = None
         if qty > 0 and inst is not None:
             try:
-                cur_price = latest_close(db, inst, today, cache_only=True)
+                # cache_only=False: if today's price isn't cached, fetch it.
+                # After Refresh prices, the cache is warm so this is instant.
+                # Using True here causes wrong XIRR when cache is cold.
+                cur_price = latest_close(db, inst, today, cache_only=False)
             except Exception:
                 cur_price = None
             if cur_price is not None:
