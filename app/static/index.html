@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Portfolio Tracker</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Portfolio Tracker</h1>
+    <div class="actions">
+      <button id="btn-refresh">Refresh prices</button>
+      <span id="as-of" class="muted"></span>
+    </div>
+  </header>
+
+  <main>
+    <!-- Data quality warning -->
+    <div id="dq-banner" style="display:none" class="dq-banner">
+      <strong>Data issue detected:</strong> <span id="dq-message"></span>
+      <button id="dq-expand" style="margin-left:8px;font-size:12px;">Show details</button>
+      <div id="dq-details" style="display:none;margin-top:8px;"></div>
+    </div>
+
+    <!-- Summary cards -->
+    <section id="summary-cards" class="cards"></section>
+
+    <!-- XIRR Analysis (collapsible, open by default) -->
+    <section class="card collapsible" data-section="xirr">
+      <div class="section-header row-between">
+        <h2>XIRR Analysis <span class="muted small" id="xirr-period-label">all-time</span></h2>
+        <div class="actions">
+          <select id="xirr-period-select"></select>
+          <span id="xirr-custom-inputs" style="display:none;gap:6px;align-items:center;">
+            <input type="date" id="xirr-from" class="date-input" />
+            <span class="muted">to</span>
+            <input type="date" id="xirr-to" class="date-input" />
+            <button id="xirr-apply" style="font-size:12px;padding:4px 10px;">Apply</button>
+          </span>
+          <button class="collapse-btn" data-target="xirr">▲</button>
+        </div>
+      </div>
+      <div class="section-body" id="body-xirr">
+        <div id="xirr-short-period-warning" class="muted small" style="display:none;margin-bottom:8px;">
+          ⚠ Period &lt; 3 months — XIRR annualizes short-period returns, making them appear extreme. Use as a directional indicator only.
+        </div>
+        <div id="xirr-content" class="xirr-grid"></div>
+      </div>
+    </section>
+
+    <!-- Realized P&L (collapsible, open by default) -->
+    <section class="card collapsible" data-section="realized">
+      <div class="section-header row-between">
+        <h2>Realized P&amp;L <span class="muted small" id="realized-period-label">all-time</span></h2>
+        <div class="actions">
+          <select id="realized-period-select"></select>
+          <span id="custom-range-inputs" style="display:none;gap:6px;align-items:center;">
+            <input type="date" id="custom-from" class="date-input" />
+            <span class="muted">to</span>
+            <input type="date" id="custom-to" class="date-input" />
+            <button id="custom-apply" style="font-size:12px;padding:4px 10px;">Apply</button>
+          </span>
+          <button class="collapse-btn" data-target="realized">▲</button>
+        </div>
+      </div>
+      <div class="section-body" id="body-realized">
+        <div id="realized-pnl-content" class="realized-grid"></div>
+      </div>
+    </section>
+
+    <!-- Equity Curve (collapsible, open by default) -->
+    <section class="card collapsible chart-card" data-section="chart">
+      <div class="section-header row-between">
+        <h2>Equity Curve <span class="muted small" id="curve-subtitle"></span></h2>
+        <button class="collapse-btn" data-target="chart">▲</button>
+      </div>
+      <div class="section-body" id="body-chart">
+        <div class="chart-container">
+          <canvas id="equity-chart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Holdings (collapsible, open by default) -->
+    <section class="card collapsible" data-section="holdings">
+      <div class="section-header row-between">
+        <h2>Holdings</h2>
+        <div class="actions">
+          <input type="text" id="holdings-filter" placeholder="Filter symbol…" class="filter-input" />
+          <label class="toggle-label">
+            <input type="checkbox" id="hide-closed" checked />
+            Hide sold
+          </label>
+          <button class="collapse-btn" data-target="holdings">▲</button>
+        </div>
+      </div>
+      <div class="section-body" id="body-holdings">
+        <div class="table-wrap">
+          <table id="holdings-table">
+            <thead>
+              <tr>
+                <th class="sortable" data-col="symbol">Symbol <span class="sort-icon"></span></th>
+                <th>Type</th>
+                <th class="num sortable" data-col="quantity">Qty <span class="sort-icon"></span></th>
+                <th class="num sortable" data-col="avg_cost">Avg Cost <span class="sort-icon"></span></th>
+                <th class="num sortable" data-col="current_price">Price <span class="sort-icon"></span></th>
+                <th class="num sortable" data-col="invested">Invested <span class="sort-icon"></span></th>
+                <th class="num sortable" data-col="current_value">Current <span class="sort-icon"></span></th>
+                <th class="num sortable" data-col="pnl">P&amp;L <span class="sort-icon"></span></th>
+                <th class="num sortable" data-col="pct_return">% Return <span class="sort-icon"></span></th>
+                <th class="num sortable" data-col="xirr">XIRR <span class="sort-icon"></span></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Corporate Actions (collapsible, collapsed by default) -->
+    <section class="card collapsible" data-section="ca">
+      <div class="section-header row-between">
+        <h2>Corporate Actions <span class="muted small">splits · bonuses · dividends · mergers</span></h2>
+        <div class="actions">
+          <button id="btn-ca-fetch">Sync from yfinance</button>
+          <button id="btn-ca-add">+ Add manually</button>
+          <button class="collapse-btn" data-target="ca">▼</button>
+        </div>
+      </div>
+      <div class="section-body collapsed" id="body-ca">
+        <div id="ca-sync-result" class="muted small"></div>
+        <div class="table-wrap">
+          <table id="ca-table">
+            <thead>
+              <tr>
+                <th>Symbol</th><th>Type</th><th>Ex-date</th>
+                <th class="num">Ratio / Amount</th><th>Notes</th><th>Source</th><th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Symbol Renames (collapsible, collapsed by default) -->
+    <section class="card collapsible" data-section="aliases">
+      <div class="section-header row-between">
+        <h2>Symbol Renames <span class="muted small">when NSE changes a ticker</span></h2>
+        <div class="actions">
+          <button id="btn-alias-add">+ Add rename</button>
+          <button class="collapse-btn" data-target="aliases">▼</button>
+        </div>
+      </div>
+      <div class="section-body collapsed" id="body-aliases">
+        <div class="table-wrap">
+          <table id="alias-table">
+            <thead><tr><th>Old symbol</th><th>New symbol</th><th>Source</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Transactions (collapsible, collapsed by default) -->
+    <section class="card collapsible" data-section="txns">
+      <div class="section-header row-between">
+        <h2>Transactions</h2>
+        <div class="actions">
+          <label class="btn-like">
+            Import CSV/XLSX
+            <input id="import-input" type="file" accept=".csv,.xlsx,.xls" hidden />
+          </label>
+          <a class="btn-like" href="/api/transactions.csv">Export CSV</a>
+          <button id="btn-add">+ Add transaction</button>
+          <button class="collapse-btn" data-target="txns">▼</button>
+        </div>
+      </div>
+      <div class="section-body collapsed" id="body-txns">
+        <div id="import-result" class="muted small"></div>
+        <div class="table-wrap">
+          <table id="txn-table">
+            <thead>
+              <tr>
+                <th>Date</th><th>Symbol</th><th>Seg</th><th>Type</th>
+                <th class="num">Qty</th><th class="num">Price</th>
+                <th class="num">Fees</th><th>Source</th><th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Add/Edit transaction modal -->
+  <dialog id="txn-dialog">
+    <form id="txn-form" method="dialog">
+      <h3 id="txn-form-title">Add transaction</h3>
+      <input type="hidden" name="id" />
+      <label>Date<input type="date" name="trade_date" required /></label>
+      <label>Symbol<input type="text" name="symbol" required /></label>
+      <label>ISIN<input type="text" name="isin" placeholder="optional" /></label>
+      <div class="grid2">
+        <label>Segment
+          <select name="segment" required>
+            <option value="EQ">Equity</option>
+            <option value="MF">Mutual Fund</option>
+          </select>
+        </label>
+        <label>Type
+          <select name="trade_type" required>
+            <option value="buy">Buy</option>
+            <option value="sell">Sell</option>
+          </select>
+        </label>
+      </div>
+      <label>Exchange<input type="text" name="exchange" placeholder="NSE / BSE (optional)" /></label>
+      <div class="grid2">
+        <label>Quantity<input type="number" name="quantity" step="any" min="0" required /></label>
+        <label>Price<input type="number" name="price" step="any" min="0" required /></label>
+      </div>
+      <label>Fees<input type="number" name="fees" step="any" min="0" value="0" /></label>
+      <label>Notes<input type="text" name="notes" /></label>
+      <div class="actions right">
+        <button type="button" id="txn-cancel">Cancel</button>
+        <button type="submit" id="txn-save">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Corporate action modal -->
+  <dialog id="ca-dialog">
+    <form id="ca-form" method="dialog">
+      <h3 id="ca-form-title">Add corporate action</h3>
+      <input type="hidden" name="id" />
+      <label>Symbol<input type="text" name="symbol" required placeholder="e.g. VBL" /></label>
+      <label>ISIN<input type="text" name="isin" placeholder="optional" /></label>
+      <label>Type
+        <select name="action_type" required id="ca-type-select">
+          <option value="split">Split</option>
+          <option value="bonus">Bonus</option>
+          <option value="dividend">Dividend</option>
+          <option value="merger">Merger</option>
+          <option value="demerger">Demerger</option>
+        </select>
+      </label>
+      <label>Ex-date<input type="date" name="ex_date" required /></label>
+      <div id="ca-ratio-row">
+        <label>Ratio (new shares per old share)
+          <input type="number" name="ratio" step="any" min="0" placeholder="e.g. 2 for 1:1 bonus" />
+        </label>
+      </div>
+      <div id="ca-div-row" style="display:none">
+        <label>Amount per share (₹)
+          <input type="number" name="amount_per_share" step="any" min="0" />
+        </label>
+      </div>
+      <label>Notes<input type="text" name="notes" /></label>
+      <div class="actions right">
+        <button type="button" id="ca-cancel">Cancel</button>
+        <button type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

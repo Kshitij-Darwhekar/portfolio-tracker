@@ -1,0 +1,9 @@
+.venv
+venv
+__pycache__
+*.pyc
+data/*.db
+data/*.db-journal
+.git
+.gitignore
+README.md
