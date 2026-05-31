@@ -3,9 +3,22 @@ __pycache__/
 .venv/
 venv/
 .env
+
+# Database — contains all personal financial data
 data/*.db
 data/*.db-journal
-.DS_Store
+
+# User-defined symbol aliases — may reveal holdings
+data/symbol_aliases.json
+
+# Raw import files — tradebook, CAS statements, broker exports
+*.csv
+*.xlsx
+*.xls
+*.pdf
+
+# Logs and editor files
 *.log
+.DS_Store
 .idea/
 .vscode/
