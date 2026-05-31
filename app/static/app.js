@@ -350,7 +350,7 @@ document.querySelectorAll(".seg-btn").forEach((btn) => {
     const isFI = activeSegment === "FI";
 
     // On FI tab: hide equity-specific panels (they show zeros or irrelevant data)
-    const equityOnlyPanels = ["xirr", "realized", "chart", "holdings", "ca", "aliases", "fi-charts"];
+    const equityOnlyPanels = ["xirr", "realized", "chart", "holdings", "ca", "aliases", "fi-charts", "txns"];
     equityOnlyPanels.forEach(sec => {
       const el = document.querySelector(`[data-section="${sec}"]`);
       if (el) el.style.display = isFI ? "none" : "";
