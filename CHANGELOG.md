@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.2.2] — 2026-05-31
+
+### Fixed
+- **XIRR correctness regression** — `cache_only=True` was applied too broadly to `latest_close()` in holdings computation. On cold cache (e.g. newly imported MF schemes with no cached prices), holdings showed ₹0 current value, deflating combined XIRR from 12.62% to 7.85%. Root cause: the `have_start AND have_end` boundary probe in `get_close_series` fails when the exact boundary date has no market data (weekend/holiday), triggering a full multi-year history download even for a simple current-price lookup.
+- **`latest_close()` rewritten** to use a direct `ORDER BY on_date DESC LIMIT 1` query — no boundary probing, no range scanning. Warm cache: ~0.3ms per instrument. Cold cache: fetches only the last 30 days, not full history.
+- `cache_only=True` now only applied to `get_close_series()` for full multi-year historical ranges (equity curve, benchmark series) where it prevents years of redundant API calls. Current-price lookups always use live data as a fallback.
+
+---
+
 ## [0.2.1] — 2026-05-31
 
 ### Performance
