@@ -20,6 +20,309 @@ function escapeHtml(s) {
 
 let chart = null;
 
+// ---- FI benchmark rates editor ----
+async function openFiRatesEditor() {
+  const rates = await api("/api/fi/rates");
+  const sav = prompt(`Savings account rate % (currently ${rates.savings_rate}%)\nSBI/HDFC/ICICI typically 2.7–3.5%:`, rates.savings_rate);
+  if (sav === null) return;
+  const fd  = prompt(`Standard 1-year FD rate % (currently ${rates.std_fd_rate}%)\nSBI ~6.8%, HDFC ~7%:`, rates.std_fd_rate);
+  if (fd === null) return;
+  const inf = prompt(`CPI inflation rate % (currently ${rates.inflation_rate}%)\nRBI target ~4%, recent avg ~4.5%:`, rates.inflation_rate);
+  if (inf === null) return;
+  try {
+    await api("/api/fi/rates", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ savings_rate: parseFloat(sav), std_fd_rate: parseFloat(fd), inflation_rate: parseFloat(inf) }),
+    });
+    await Promise.all([loadFiCharts(), loadXirrAnalysis(document.getElementById("xirr-period-select").value)]);
+  } catch (e) { alert("Failed: " + e.message); }
+}
+
+// ---- Fixed Income (FD / RD) ----
+
+const FI_TYPE_LABELS = {
+  FD_CUM:     "FD Cumulative",
+  FD_NON_CUM: "FD Non-Cumulative",
+  RD:         "Recurring Deposit",
+};
+
+let fiGrowthChart  = null;
+let fiCashflowChart = null;
+let fiFyChart = null;
+
+async function loadFiCharts() {
+  const section = document.getElementById("fi-charts-section");
+  if (!section) return;
+  section.style.display = activeSegment === "FI" ? "" : "none";
+  if (activeSegment !== "FI") return;
+
+  try {
+    const d = await api("/api/fi/chart-data");
+
+    // 1. Maturity Timeline (custom HTML bars)
+    const tl = document.getElementById("fi-timeline");
+    if (!d.maturity_timeline.length) {
+      tl.innerHTML = `<div class="muted small">No FD/RD entries yet.</div>`;
+    } else {
+      // Find overall date range for scaling bars
+      const allDates = d.maturity_timeline.flatMap(r => [new Date(r.start), new Date(r.end)]);
+      const minD = new Date(Math.min(...allDates));
+      const maxD = new Date(Math.max(...allDates));
+      const span = maxD - minD || 1;
+
+      tl.innerHTML = d.maturity_timeline.map(r => {
+        const s = new Date(r.start), e = new Date(r.end), now = new Date();
+        const left  = Math.max(0, (s - minD) / span * 100);
+        const width = Math.min(100 - left, (e - s) / span * 100);
+        const dtmText = r.days_to_maturity < 0
+          ? `matured ${Math.abs(r.days_to_maturity)}d ago`
+          : `${r.days_to_maturity}d`;
+        return `<div class="fi-timeline-item">
+          <div class="fi-timeline-label" title="${r.label}">${r.label}</div>
+          <div class="fi-timeline-track">
+            <div class="fi-timeline-bar ${r.status}" style="left:${left.toFixed(1)}%;width:${width.toFixed(1)}%"></div>
+          </div>
+          <div class="fi-timeline-value">${fmtINR(r.maturity_value)}<br><span class="muted" style="font-size:10px">${dtmText}</span></div>
+        </div>`;
+      }).join("");
+    }
+
+    // 1b. Growth curve (FI value vs savings vs inflation)
+    const gc = d.growth_curve;
+    const subtitle = document.getElementById("fi-curve-subtitle");
+    if (subtitle) subtitle.textContent =
+      `vs ${gc.savings_rate}% savings · ${gc.std_fd_rate}% std FD · ${gc.inflation_rate}% inflation`;
+
+    const gcCtx = document.getElementById("fi-growth-chart").getContext("2d");
+    if (fiGrowthChart) fiGrowthChart.destroy();
+    fiGrowthChart = new Chart(gcCtx, {
+      type: "line",
+      data: {
+        labels: gc.labels,
+        datasets: [
+          { label: "Your FI Portfolio",             data: gc.fi,       borderColor: "#58a6ff", backgroundColor: "transparent", borderWidth: 2.5, pointRadius: 0, tension: 0.1, spanGaps: true },
+          { label: `Std FD (${gc.std_fd_rate}%)`,   data: gc.std_fd,   borderColor: "#3fb950", backgroundColor: "transparent", borderWidth: 1.5, borderDash: [6,3], pointRadius: 0, tension: 0.1, spanGaps: true },
+          { label: `Savings (${gc.savings_rate}%)`, data: gc.savings,  borderColor: "#d29922", backgroundColor: "transparent", borderWidth: 1.5, borderDash: [4,4], pointRadius: 0, tension: 0.1, spanGaps: true },
+          { label: `Inflation (${gc.inflation_rate}%)`, data: gc.inflation, borderColor: "#f85149", backgroundColor: "transparent", borderWidth: 1.5, borderDash: [2,3], pointRadius: 0, tension: 0.1, spanGaps: true },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: { labels: { color: "#e6edf3" } },
+          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${fmtINR(c.parsed.y)}` } },
+        },
+        scales: {
+          x: { ticks: { color: "#8b949e", maxTicksLimit: 10 }, grid: { color: "#2a3038" } },
+          y: { ticks: { color: "#8b949e", callback: v => fmtINR(v) }, grid: { color: "#2a3038" } },
+        },
+      },
+    });
+
+    // 2. Cashflow Forecast bar chart
+    const cfCtx = document.getElementById("fi-cashflow-chart").getContext("2d");
+    if (fiCashflowChart) fiCashflowChart.destroy();
+    fiCashflowChart = new Chart(cfCtx, {
+      type: "bar",
+      data: {
+        labels: d.cashflow_forecast.labels,
+        datasets: [{ label: "Expected inflow", data: d.cashflow_forecast.values,
+          backgroundColor: "rgba(88,166,255,0.6)", borderColor: "rgba(88,166,255,1)", borderWidth: 1 }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: c => fmtINR(c.parsed.y) } } },
+        scales: {
+          x: { ticks: { color: "#8b949e", maxTicksLimit: 8 }, grid: { color: "#2a3038" } },
+          y: { ticks: { color: "#8b949e", callback: v => fmtINR(v) }, grid: { color: "#2a3038" } },
+        },
+      },
+    });
+
+    // 3. FY Interest income bar chart
+    const fyCtx = document.getElementById("fi-fy-chart").getContext("2d");
+    if (fiFyChart) fiFyChart.destroy();
+    fiFyChart = new Chart(fyCtx, {
+      type: "bar",
+      data: {
+        labels: d.fy_interest.map(r => r.fy),
+        datasets: [{ label: "Interest income", data: d.fy_interest.map(r => r.interest),
+          backgroundColor: "rgba(63,185,80,0.6)", borderColor: "rgba(63,185,80,1)", borderWidth: 1 }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: c => fmtINR(c.parsed.y) + " (taxable)" } } },
+        scales: {
+          x: { ticks: { color: "#8b949e" }, grid: { color: "#2a3038" } },
+          y: { ticks: { color: "#8b949e", callback: v => fmtINR(v) }, grid: { color: "#2a3038" } },
+        },
+      },
+    });
+  } catch (e) {
+    console.error("FI charts error:", e);
+  }
+}
+
+async function loadFiHoldings() {
+  const section = document.getElementById("fi-section");
+  if (!section) return;
+
+  // Show FI holdings + charts sections only when FI tab is active
+  section.style.display = activeSegment === "FI" ? "" : "none";
+  const chartsSection = document.getElementById("fi-charts-section");
+  if (chartsSection) chartsSection.style.display = activeSegment === "FI" ? "" : "none";
+  if (activeSegment !== "FI") return;
+
+  try {
+    const [records, summary] = await Promise.all([
+      api("/api/fi"),
+      api("/api/fi/summary"),
+    ]);
+
+    // Summary mini-cards
+    const sc = document.getElementById("fi-summary-cards");
+    sc.innerHTML = [
+      `<div class="card"><h3>Invested</h3><div class="value">${fmtINR(summary.total_invested)}</div></div>`,
+      `<div class="card"><h3>Current Value</h3><div class="value">${fmtINR(summary.total_current)}</div></div>`,
+      `<div class="card"><h3>Interest Earned</h3><div class="value ${cls(summary.total_interest_earned)}">${fmtINR(summary.total_interest_earned)}</div></div>`,
+      `<div class="card"><h3>This FY Interest</h3><div class="value pos">${fmtINR(summary.total_fy_interest)}</div><div class="sub">taxable as income</div></div>`,
+      summary.fi_xirr != null ? `<div class="card"><h3>FI XIRR</h3><div class="value ${cls(summary.fi_xirr)}">${fmtPct(summary.fi_xirr)}</div></div>` : "",
+    ].join("");
+
+    // TDS warning
+    if (summary.tds_warnings && summary.tds_warnings.length) {
+      const warn = summary.tds_warnings.map(w =>
+        `<strong>${w.bank}</strong>: ₹${w.fy_interest.toFixed(0)} FY interest → est. TDS ₹${w.tds.toFixed(0)}`
+      ).join("; ");
+      sc.innerHTML += `<div class="card" style="border-color:rgba(210,153,34,.5);grid-column:1/-1"><h3>⚠ TDS Warning</h3><div class="sub">${warn}</div></div>`;
+    }
+
+    // Table
+    const tbody = document.querySelector("#fi-table tbody");
+    tbody.innerHTML = "";
+    for (const r of records) {
+      const badge = `<span class="fi-badge ${r.status}">${r.status}</span>`;
+      const tds   = r.tds_applicable ? `<span class="tds-warn">⚠ TDS</span>` : "—";
+      const typeLabel = FI_TYPE_LABELS[r.fi_type] || r.fi_type;
+      const dtm   = r.days_to_maturity >= 0
+        ? `${r.days_to_maturity}d left`
+        : `Matured ${Math.abs(r.days_to_maturity)}d ago`;
+      tbody.innerHTML += `
+        <tr data-id="${r.id}">
+          <td><strong>${r.bank}</strong>${r.account_no ? `<div class="muted" style="font-size:11px">${r.account_no}</div>` : ""}</td>
+          <td class="muted">${typeLabel}</td>
+          <td class="num">${fmtINR(r.amount)}</td>
+          <td class="num">${r.interest_rate}%</td>
+          <td><div style="font-size:12px">${r.start_date} → ${r.maturity_date}</div><div class="muted" style="font-size:11px">${dtm}</div></td>
+          <td class="num">${fmtINR(r.current_value)}</td>
+          <td class="num">${fmtINR(r.maturity_value)}</td>
+          <td class="num pos">${fmtINR(r.interest_this_fy)}</td>
+          <td>${tds}</td>
+          <td>${badge}</td>
+          <td><button class="edit-btn fi-edit-btn" data-id="${r.id}">edit</button><button class="delete-btn fi-del-btn" data-id="${r.id}">delete</button></td>
+        </tr>`;
+    }
+    if (!tbody.innerHTML) {
+      tbody.innerHTML = `<tr><td colspan="11" class="muted" style="text-align:center;padding:20px;">No FDs or RDs yet — click "+ Add FD / RD" to get started.</td></tr>`;
+    }
+  } catch (e) {
+    console.error("FI load error:", e);
+  }
+}
+
+// Type select: show/hide payout frequency and update label
+document.getElementById("fi-type-select")?.addEventListener("change", (e) => {
+  const isNonCum = e.target.value === "FD_NON_CUM";
+  const isRD     = e.target.value === "RD";
+  document.getElementById("fi-payout-row").style.display  = isNonCum ? "" : "none";
+  document.getElementById("fi-initial-row").style.display = isRD     ? "" : "none";
+  document.getElementById("fi-amount-label").firstChild.textContent =
+    isRD ? "Monthly instalment (₹)" : "Principal (₹)";
+});
+
+const fiDialog = document.getElementById("fi-dialog");
+const fiForm   = document.getElementById("fi-form");
+
+document.getElementById("btn-fi-add")?.addEventListener("click", () => {
+  fiForm.reset();
+  fiForm.querySelector('input[name="id"]').value = "";
+  document.getElementById("fi-form-title").textContent = "Add Fixed Deposit / RD";
+  fiForm.querySelector('input[name="start_date"]').valueAsDate = new Date();
+  document.getElementById("fi-type-select").dispatchEvent(new Event("change"));
+  fiDialog.showModal();
+});
+
+document.getElementById("fi-cancel")?.addEventListener("click", (e) => {
+  e.preventDefault();
+  fiDialog.close();
+});
+
+fiForm?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const fd = new FormData(fiForm);
+  const id = fd.get("id");
+  const payload = {
+    fi_type:          fd.get("fi_type"),
+    bank:             fd.get("bank"),
+    account_no:       fd.get("account_no") || null,
+    amount:           parseFloat(fd.get("amount")),
+    start_date:       fd.get("start_date"),
+    maturity_date:    fd.get("maturity_date"),
+    interest_rate:    parseFloat(fd.get("interest_rate")),
+    compounding:      fd.get("compounding"),
+    payout_frequency: fd.get("fi_type") === "FD_NON_CUM" ? fd.get("payout_frequency") : null,
+    initial_deposit:  fd.get("fi_type") === "RD" ? parseFloat(fd.get("initial_deposit") || 0) : 0,
+    is_tax_saver:     fd.get("is_tax_saver") === "on",
+    notes:            fd.get("notes") || null,
+  };
+  const url    = id ? `/api/fi/${id}` : "/api/fi";
+  const method = id ? "PATCH" : "POST";
+  try {
+    await api(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    fiDialog.close();
+    await loadFiHoldings();
+  } catch (err) {
+    alert("Save failed: " + err.message);
+  }
+});
+
+document.querySelector("#fi-table tbody")?.addEventListener("click", async (e) => {
+  const id = e.target.dataset.id;
+  if (!id) return;
+  if (e.target.classList.contains("fi-del-btn")) {
+    if (!confirm("Delete this FD/RD?")) return;
+    try {
+      await api(`/api/fi/${id}`, { method: "DELETE" });
+      await loadFiHoldings();
+    } catch (err) { alert("Delete failed: " + err.message); }
+  } else if (e.target.classList.contains("fi-edit-btn")) {
+    const records = await api("/api/fi");
+    const r = records.find(x => x.id == id);
+    if (!r) return;
+    fiForm.reset();
+    fiForm.querySelector('input[name="id"]').value = r.id;
+    fiForm.querySelector('select[name="fi_type"]').value = r.fi_type;
+    document.getElementById("fi-type-select").dispatchEvent(new Event("change"));
+    fiForm.querySelector('input[name="bank"]').value = r.bank;
+    fiForm.querySelector('input[name="account_no"]').value = r.account_no || "";
+    fiForm.querySelector('input[name="amount"]').value = r.amount;
+    fiForm.querySelector('input[name="start_date"]').value = r.start_date;
+    fiForm.querySelector('input[name="maturity_date"]').value = r.maturity_date;
+    fiForm.querySelector('input[name="interest_rate"]').value = r.interest_rate;
+    fiForm.querySelector('select[name="compounding"]').value = r.compounding;
+    if (r.payout_frequency) fiForm.querySelector('select[name="payout_frequency"]').value = r.payout_frequency;
+    fiForm.querySelector('input[name="initial_deposit"]').value = r.initial_deposit || 0;
+    fiForm.querySelector('input[name="is_tax_saver"]').checked = r.is_tax_saver;
+    fiForm.querySelector('input[name="notes"]').value = r.notes || "";
+    document.getElementById("fi-form-title").textContent = "Edit FD / RD";
+    fiDialog.showModal();
+  }
+});
+
 // ---- segment filter (All | Equities | Mutual Funds) ----
 let activeSegment = "all";  // "all" | "EQ" | "MF"
 
@@ -43,6 +346,18 @@ document.querySelectorAll(".seg-btn").forEach((btn) => {
     const symTh   = document.getElementById("th-symbol");
     if (folioTh) folioTh.style.display = activeSegment === "MF" ? "" : "none";
     if (symTh)   symTh.textContent     = activeSegment === "MF" ? "Scheme" : "Symbol";
+
+    const isFI = activeSegment === "FI";
+
+    // On FI tab: hide equity-specific panels (they show zeros or irrelevant data)
+    const equityOnlyPanels = ["xirr", "realized", "chart", "holdings", "ca", "aliases", "fi-charts"];
+    equityOnlyPanels.forEach(sec => {
+      const el = document.querySelector(`[data-section="${sec}"]`);
+      if (el) el.style.display = isFI ? "none" : "";
+    });
+    // Also hide the generic summary cards — FI section has its own mini-cards
+    const summarySection = document.getElementById("summary-cards");
+    if (summarySection) summarySection.style.display = isFI ? "none" : "";
 
     // On tab switch: skip management panels (transactions/CAs/aliases don't change)
     refreshAll(true);
@@ -148,18 +463,49 @@ async function loadXirrAnalysis(period = "all", fromDate = null, toDate = null) 
         ${sub ? `<div class="sub">${sub}</div>` : ""}
       </div>`;
 
-    let html = box("Portfolio XIRR", r.portfolio_xirr,
-      r.from_date ? `${r.from_date} → ${r.to_date}` : "since first investment",
+    let html = "";
+
+    // Equity + MF portfolio XIRR with market benchmarks
+    html += box("Portfolio XIRR",
+      r.portfolio_xirr,
+      r.from_date ? `${r.from_date} → ${r.to_date}` : "equities + mutual funds",
       cls(r.portfolio_xirr), "portfolio-box");
 
     for (const [ticker, b] of Object.entries(r.benchmarks || {})) {
-      const diff = r.portfolio_xirr != null && b.xirr != null
-        ? r.portfolio_xirr - b.xirr : null;
-      const diffStr = diff != null
-        ? `${diff >= 0 ? "+" : ""}${(diff * 100).toFixed(2)}% vs index`
-        : null;
+      const diff = r.portfolio_xirr != null && b.xirr != null ? r.portfolio_xirr - b.xirr : null;
+      const diffStr = diff != null ? `${diff >= 0 ? "+" : ""}${(diff * 100).toFixed(2)}% vs index` : null;
       html += box(b.name, b.xirr, diffStr, cls(b.xirr));
     }
+
+    // Fixed Income XIRR with savings / inflation benchmarks — shown on All view
+    if (activeSegment === "all") {
+      try {
+        const [fiSum, fiRates] = await Promise.all([
+          api("/api/fi/summary"),
+          api("/api/fi/rates"),
+        ]);
+        if (fiSum.fi_xirr != null) {
+          const SAV  = fiRates.savings_rate   / 100;
+          const FD   = fiRates.std_fd_rate    / 100;
+          const INF  = fiRates.inflation_rate / 100;
+          html += `<div style="grid-column:1/-1;border-top:1px solid var(--border);padding-top:8px;margin-top:4px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">
+            Fixed Income — compared against fixed-rate benchmarks
+            <span style="float:right;cursor:pointer;color:var(--accent)" id="fi-rates-edit-btn" onclick="openFiRatesEditor()">edit rates</span>
+          </div>`;
+          html += box("FI XIRR", fiSum.fi_xirr, "all FDs and RDs", cls(fiSum.fi_xirr));
+          const vsSav = fiSum.fi_xirr - SAV;
+          const vsFD  = fiSum.fi_xirr - FD;
+          const vsInf = fiSum.fi_xirr - INF;
+          html += box(`Savings (${fiRates.savings_rate}%)`, SAV,
+            `${vsSav >= 0 ? "+" : ""}${(vsSav*100).toFixed(2)}% beat`, cls(vsSav));
+          html += box(`Std FD (${fiRates.std_fd_rate}%)`, FD,
+            `${vsFD >= 0 ? "+" : ""}${(vsFD*100).toFixed(2)}% vs FD rate`, cls(vsFD));
+          html += box(`Inflation (${fiRates.inflation_rate}%)`, INF,
+            `${vsInf >= 0 ? "+" : ""}${(vsInf*100).toFixed(2)}% real return`, cls(vsInf));
+        }
+      } catch (_) {}
+    }
+
     content.innerHTML = html;
   } catch (e) {
     content.innerHTML = `<div class="neg small">Failed: ${escapeHtml(e.message)}</div>`;
@@ -832,6 +1178,8 @@ async function refreshAll(tabSwitch = false) {
   const phase1 = [
     loadSummary(),
     loadHoldings(),
+    loadFiHoldings(),    // pure math — no API calls, always fast
+    loadFiCharts(),      // pure math — maturity timeline + cashflow forecast + FY interest
     loadRealizedPnl(realizedPeriod),
     loadDataQuality(),
   ];

@@ -4,6 +4,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from sqlalchemy import (
+    Boolean,
     Column,
     Date,
     DateTime,
@@ -96,10 +97,41 @@ class CorporateAction(Base):
     )
 
 
+class FixedIncome(Base):
+    """Fixed Deposits (cumulative & non-cumulative) and Recurring Deposits."""
+    __tablename__ = "fixed_income"
+
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    fi_type          = Column(String, nullable=False)   # FD_CUM | FD_NON_CUM | RD
+    bank             = Column(String, nullable=False)
+    account_no       = Column(String, nullable=True)    # optional reference number
+    amount           = Column(Float, nullable=False)    # FD: principal; RD: monthly instalment
+    start_date       = Column(Date, nullable=False)
+    maturity_date    = Column(Date, nullable=False)
+    interest_rate    = Column(Float, nullable=False)    # annual %, e.g. 7.5
+    # quarterly | monthly | half_yearly | annual | simple
+    compounding      = Column(String, nullable=False, default="quarterly")
+    # Non-cumulative only: monthly | quarterly | annual
+    payout_frequency = Column(String, nullable=True)
+    # RD only: optional lump-sum deposited on start_date in addition to monthly instalments
+    initial_deposit  = Column(Float, nullable=True, default=0.0)
+    is_tax_saver     = Column(Boolean, nullable=False, default=False)  # 80C 5-year FD
+    notes            = Column(String, nullable=True)
+    created_at       = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 def init_db() -> None:
     Base.metadata.create_all(engine)
     # One-time migration: add folio column if not yet present
     insp = inspect(engine)
+    # Migrate fixed_income.initial_deposit if table already exists
+    if "fixed_income" in insp.get_table_names():
+        fi_cols = {c["name"] for c in insp.get_columns("fixed_income")}
+        if "initial_deposit" not in fi_cols:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE fixed_income ADD COLUMN initial_deposit REAL DEFAULT 0"))
+                conn.commit()
+
     existing_cols = {c["name"] for c in insp.get_columns("transactions")}
     if "folio" not in existing_cols:
         with engine.connect() as conn:

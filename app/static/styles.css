@@ -175,6 +175,32 @@ dialog input, dialog select {
 
 #import-result { margin-bottom: 8px; }
 
+/* ---- fixed income charts ---- */
+.fi-charts-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; }
+.fi-chart-wide  { grid-column: 1 / -1; }   /* full width */
+.fi-chart-box h3 { font-size:13px; font-weight:600; margin:0 0 10px; }
+
+/* Maturity timeline bars */
+.fi-timeline-item { display:flex; align-items:center; gap:10px; margin-bottom:8px; font-size:12px; }
+.fi-timeline-label { width:220px; min-width:220px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.fi-timeline-track { flex:1; background:var(--border); border-radius:4px; height:18px; position:relative; }
+.fi-timeline-bar { height:100%; border-radius:4px; position:absolute; }
+.fi-timeline-bar.active  { background:rgba(88,166,255,.5); }
+.fi-timeline-bar.matured { background:rgba(139,148,158,.3); }
+.fi-timeline-value { width:80px; text-align:right; color:var(--text); }
+
+/* ---- fixed income ---- */
+.fi-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.fi-badge.active  { background: rgba(63,185,80,.15); color: var(--pos); }
+.fi-badge.matured { background: rgba(139,148,158,.15); color: var(--muted); }
+.tds-warn { color: #d29922; font-size: 11px; font-weight: 600; }
+
 /* ---- collapsible sections ---- */
 .collapse-btn {
   background: transparent;

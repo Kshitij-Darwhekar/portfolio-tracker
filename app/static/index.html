@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Portfolio Tracker</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
   <link rel="stylesheet" href="/static/styles.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
@@ -29,6 +30,7 @@
       <button class="seg-btn active" data-seg="all">All</button>
       <button class="seg-btn" data-seg="EQ">Equities</button>
       <button class="seg-btn" data-seg="MF">Mutual Funds</button>
+      <button class="seg-btn" data-seg="FI">Fixed Income</button>
     </div>
 
     <!-- Summary cards -->
@@ -86,6 +88,77 @@
       <div class="section-body" id="body-chart">
         <div class="chart-container">
           <canvas id="equity-chart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Fixed Income holdings + summary — shown only when FI tab is active -->
+    <section class="card collapsible fi-section" data-section="fi-holdings" id="fi-section" style="display:none">
+      <div class="section-header row-between">
+        <h2>Fixed Income <span class="muted small">FD · RD</span></h2>
+        <div class="actions">
+          <button id="btn-fi-add">+ Add FD / RD</button>
+          <button class="collapse-btn" data-target="fi-holdings">▲</button>
+        </div>
+      </div>
+      <div class="section-body" id="body-fi-holdings">
+        <div id="fi-summary-cards" class="cards" style="margin-bottom:14px;"></div>
+        <div class="table-wrap">
+          <table id="fi-table">
+            <thead>
+              <tr>
+                <th>Bank</th>
+                <th>Type</th>
+                <th class="num">Principal / Instalment</th>
+                <th class="num">Rate</th>
+                <th>Start → Maturity</th>
+                <th class="num">Current Value</th>
+                <th class="num">Maturity Value</th>
+                <th class="num">FY Interest</th>
+                <th>TDS</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- FI Charts — shown only when FI tab is active, sits below the FI holdings table -->
+    <section class="card collapsible fi-section" data-section="fi-charts" id="fi-charts-section" style="display:none">
+      <div class="section-header row-between">
+        <h2>FI Analysis</h2>
+        <button class="collapse-btn" data-target="fi-charts">▲</button>
+      </div>
+      <div class="section-body" id="body-fi-charts">
+        <div class="fi-charts-grid">
+
+          <div class="fi-chart-box fi-chart-wide">
+            <h3>Portfolio Growth <span class="muted small" id="fi-curve-subtitle"></span></h3>
+            <div style="position:relative;height:240px">
+              <canvas id="fi-growth-chart"></canvas>
+            </div>
+          </div>
+
+          <div class="fi-chart-box">
+            <h3>Maturity Timeline</h3>
+            <div id="fi-timeline"></div>
+          </div>
+          <div class="fi-chart-box">
+            <h3>Cashflow Forecast <span class="muted small">(next 24 months)</span></h3>
+            <div style="position:relative;height:200px">
+              <canvas id="fi-cashflow-chart"></canvas>
+            </div>
+          </div>
+          <div class="fi-chart-box">
+            <h3>Interest Income by FY <span class="muted small">(taxable)</span></h3>
+            <div style="position:relative;height:200px">
+              <canvas id="fi-fy-chart"></canvas>
+            </div>
+          </div>
+
         </div>
       </div>
     </section>
@@ -274,6 +347,70 @@
       <label>Notes<input type="text" name="notes" /></label>
       <div class="actions right">
         <button type="button" id="ca-cancel">Cancel</button>
+        <button type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Fixed Income add/edit modal -->
+  <dialog id="fi-dialog">
+    <form id="fi-form" method="dialog">
+      <h3 id="fi-form-title">Add Fixed Deposit / RD</h3>
+      <input type="hidden" name="id" />
+      <label>Type
+        <select name="fi_type" id="fi-type-select" required>
+          <option value="FD_CUM">FD — Cumulative (interest at maturity)</option>
+          <option value="FD_NON_CUM">FD — Non-cumulative (periodic payout)</option>
+          <option value="RD">Recurring Deposit (monthly instalment)</option>
+        </select>
+      </label>
+      <div class="grid2">
+        <label>Bank / Institution<input type="text" name="bank" required placeholder="HDFC Bank" /></label>
+        <label>Account / Ref no.<input type="text" name="account_no" placeholder="optional" /></label>
+      </div>
+      <div class="grid2">
+        <label id="fi-amount-label">Principal (₹)<input type="number" name="amount" step="any" min="1" required /></label>
+        <label>Annual interest rate (%)<input type="number" name="interest_rate" step="0.01" min="0.1" max="99" required placeholder="7.5" /></label>
+      </div>
+      <div class="grid2">
+        <label>Start date<input type="date" name="start_date" required /></label>
+        <label>Maturity date<input type="date" name="maturity_date" required /></label>
+      </div>
+      <label>Compounding
+        <select name="compounding">
+          <option value="quarterly">Quarterly (default for Indian banks)</option>
+          <option value="monthly">Monthly</option>
+          <option value="half_yearly">Half-yearly</option>
+          <option value="annual">Annual</option>
+          <option value="simple">Simple interest</option>
+        </select>
+      </label>
+      <div id="fi-payout-row" style="display:none">
+        <label>Interest payout frequency
+          <select name="payout_frequency">
+            <option value="monthly">Monthly</option>
+            <option value="quarterly">Quarterly</option>
+            <option value="annual">Annual</option>
+          </select>
+        </label>
+      </div>
+      <div id="fi-initial-row" style="display:none">
+        <label>Extra opening deposit (₹) — leave 0 for standard RDs
+          <input type="number" name="initial_deposit" step="any" min="0" value="0" />
+        </label>
+        <div class="muted small" style="margin-top:4px;line-height:1.5">
+          Only enter a non-zero amount if your bank required a <strong>separate lump sum</strong>
+          on the opening date <em>in addition to</em> your first monthly instalment.
+          For a standard RD, the first payment is already counted as month 1 — leave this at <strong>0</strong>.
+        </div>
+      </div>
+      <label class="toggle-label" style="flex-direction:row;gap:8px;align-items:center;">
+        <input type="checkbox" name="is_tax_saver" />
+        Tax Saver FD (5-year, 80C deduction)
+      </label>
+      <label>Notes<input type="text" name="notes" /></label>
+      <div class="actions right">
+        <button type="button" id="fi-cancel">Cancel</button>
         <button type="submit">Save</button>
       </div>
     </form>

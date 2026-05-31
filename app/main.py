@@ -14,6 +14,8 @@ from sqlalchemy.orm import Session
 
 from .analytics import (
     compute_equity_curve,
+    compute_fi_holdings,
+    compute_fi_summary,
     compute_holdings,
     compute_period_xirr,
     compute_realized_pnl_by_period,
@@ -22,7 +24,8 @@ from .analytics import (
     portfolio_cashflows,
 )
 from .corporate_actions import auto_fetch_all
-from .db import CorporateAction, Transaction, get_session, init_db
+from .fi_rates import load_fi_rates, update_fi_rate
+from .db import CorporateAction, FixedIncome, Transaction, get_session, init_db
 from .importer import import_tradebook
 from .mf_importer import import_cas_pdf
 from .prices import BENCHMARKS, add_symbol_alias, list_symbol_aliases, remove_symbol_alias
@@ -43,6 +46,11 @@ def _startup() -> None:
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    return FileResponse(STATIC_DIR / "favicon.svg", media_type="image/svg+xml")
 
 
 # --- transactions ---
@@ -469,6 +477,247 @@ def delete_corporate_action(ca_id: int, db: Session = Depends(get_session)):
 def auto_fetch_corporate_actions(db: Session = Depends(get_session)):
     result = auto_fetch_all(db)
     return result
+
+
+# --- fixed income (FD / RD) ---
+
+class FIIn(BaseModel):
+    fi_type:          str = Field(pattern="^(FD_CUM|FD_NON_CUM|RD)$")
+    bank:             str
+    account_no:       str | None = None
+    amount:           float = Field(gt=0)
+    start_date:       date
+    maturity_date:    date
+    interest_rate:    float = Field(gt=0, lt=100)
+    compounding:      str = "quarterly"
+    payout_frequency: str | None = None
+    initial_deposit:  float = 0.0    # RD only: lump-sum on start date
+    is_tax_saver:     bool = False
+    notes:            str | None = None
+
+
+def _fi_to_dict(fi: FixedIncome) -> dict:
+    from .fi_calc import (
+        current_value as fi_cv, maturity_value as fi_mv,
+        interest_earned_total, interest_this_fy,
+    )
+    today = date.today()
+    cv  = fi_cv(fi)
+    mv  = fi_mv(fi)
+    ie  = interest_earned_total(fi, today)
+    fy  = interest_this_fy(fi, today)
+    dtm = (fi.maturity_date - today).days
+    return {
+        "id": fi.id, "fi_type": fi.fi_type, "bank": fi.bank,
+        "account_no": fi.account_no, "amount": fi.amount,
+        "start_date": fi.start_date.isoformat(),
+        "maturity_date": fi.maturity_date.isoformat(),
+        "interest_rate": fi.interest_rate, "compounding": fi.compounding,
+        "payout_frequency": fi.payout_frequency,
+        "initial_deposit": fi.initial_deposit or 0.0,
+        "is_tax_saver": fi.is_tax_saver, "notes": fi.notes,
+        "current_value": round(cv, 2), "maturity_value": round(mv, 2),
+        "interest_earned": round(ie, 2), "interest_this_fy": round(fy, 2),
+        "days_to_maturity": dtm, "status": "matured" if dtm < 0 else "active",
+    }
+
+
+@app.get("/api/fi")
+def list_fi(db: Session = Depends(get_session)):
+    records = db.execute(select(FixedIncome).order_by(FixedIncome.start_date)).scalars().all()
+    return [_fi_to_dict(r) for r in records]
+
+
+@app.post("/api/fi")
+def create_fi(payload: FIIn, db: Session = Depends(get_session)):
+    fi = FixedIncome(**payload.model_dump())
+    db.add(fi)
+    db.commit()
+    db.refresh(fi)
+    return _fi_to_dict(fi)
+
+
+@app.patch("/api/fi/{fi_id}")
+def update_fi(fi_id: int, payload: FIIn, db: Session = Depends(get_session)):
+    fi = db.get(FixedIncome, fi_id)
+    if not fi:
+        raise HTTPException(404, "Not found")
+    for k, v in payload.model_dump().items():
+        setattr(fi, k, v)
+    db.commit()
+    db.refresh(fi)
+    return _fi_to_dict(fi)
+
+
+@app.delete("/api/fi/{fi_id}")
+def delete_fi(fi_id: int, db: Session = Depends(get_session)):
+    fi = db.get(FixedIncome, fi_id)
+    if not fi:
+        raise HTTPException(404, "Not found")
+    db.delete(fi)
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/fi/rates")
+def get_fi_rates():
+    """Current benchmark rates used for FI growth curve comparison."""
+    return load_fi_rates()
+
+
+@app.patch("/api/fi/rates")
+def update_fi_rates(payload: dict):
+    """Update one or more benchmark rates.
+
+    Valid keys: savings_rate, std_fd_rate, inflation_rate  (all annual %)
+    Example: {"savings_rate": 3.25, "std_fd_rate": 6.8}
+    """
+    updated = load_fi_rates()
+    for key, val in payload.items():
+        try:
+            updated = update_fi_rate(key, float(val))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    return updated
+
+
+@app.get("/api/fi/summary")
+def fi_summary(db: Session = Depends(get_session)):
+    return compute_fi_summary(db)
+
+
+@app.get("/api/fi/chart-data")
+def fi_chart_data(db: Session = Depends(get_session)):
+    """Three datasets for the Fixed Income charts:
+
+    1. maturity_timeline  — one bar per instrument: {label, start, end, value, status}
+    2. cashflow_forecast  — monthly inflow projections for next 24 months
+    3. fy_interest        — interest earned per financial year (historical + current)
+    """
+    from .fi_calc import (
+        fd_non_cum_payout, rd_tenure_months,
+        maturity_value as fi_mv, interest_this_fy, value_on,
+    )
+    from dateutil.relativedelta import relativedelta
+    import calendar
+
+    today = date.today()
+    records = db.execute(select(FixedIncome).order_by(FixedIncome.start_date)).scalars().all()
+
+    # 1. Maturity timeline
+    timeline = []
+    for fi in records:
+        mat_v = fi_mv(fi)
+        dtm = (fi.maturity_date - today).days
+        timeline.append({
+            "id": fi.id,
+            "label": f"{fi.bank} — {fi.fi_type.replace('_', ' ')} @ {fi.interest_rate}%",
+            "start": fi.start_date.isoformat(),
+            "end": fi.maturity_date.isoformat(),
+            "maturity_value": round(mat_v, 2),
+            "principal": fi.amount,
+            "status": "matured" if dtm < 0 else "active",
+            "days_to_maturity": dtm,
+        })
+
+    # 2. Monthly cashflow forecast (next 24 months)
+    forecast: dict[str, float] = {}
+    horizon = today + relativedelta(months=24)
+    for fi in records:
+        # Maturity payout
+        if today <= fi.maturity_date <= horizon:
+            key = fi.maturity_date.strftime("%Y-%m")
+            forecast[key] = forecast.get(key, 0) + fi_mv(fi)
+
+        # Non-cumulative periodic interest payouts
+        if fi.fi_type == "FD_NON_CUM" and fi.payout_frequency:
+            from .fi_calc import _PAYOUT_MONTHS, fd_non_cum_payout
+            months = _PAYOUT_MONTHS.get(fi.payout_frequency, 3)
+            payout = fd_non_cum_payout(fi.amount, fi.interest_rate, fi.payout_frequency)
+            d = fi.start_date + relativedelta(months=months)
+            while d <= min(fi.maturity_date, horizon):
+                if d >= today:
+                    key = d.strftime("%Y-%m")
+                    forecast[key] = forecast.get(key, 0) + payout
+                d += relativedelta(months=months)
+
+    # Build complete month list
+    cashflow_labels = []
+    cashflow_values = []
+    d = today.replace(day=1)
+    while d <= horizon:
+        k = d.strftime("%Y-%m")
+        cashflow_labels.append(k)
+        cashflow_values.append(round(forecast.get(k, 0), 2))
+        d += relativedelta(months=1)
+
+    # 3. FY interest income (last 5 FYs + current)
+    fy_interest_data = []
+    current_fy_year = today.year if today.month >= 4 else today.year - 1
+    for fy in range(current_fy_year - 4, current_fy_year + 1):
+        fy_end = date(fy + 1, 3, 31)
+        fy_label = f"FY{fy}-{str(fy+1)[-2:]}"
+        if fy_end > today:
+            fy_end = today
+        total_int = sum(interest_this_fy(fi, fy_end) for fi in records)
+        fy_interest_data.append({"fy": fy_label, "interest": round(total_int, 2)})
+
+    # 4. Growth curve: total FI value vs configurable benchmark rates
+    from .fi_rates import load_fi_rates
+    _rates = load_fi_rates()
+    SAVINGS_RATE   = _rates["savings_rate"]
+    STD_FD_RATE    = _rates["std_fd_rate"]
+    INFLATION_RATE = _rates["inflation_rate"]
+
+    if records:
+        from .fi_calc import value_on as fi_value_on
+        curve_start = min(fi.start_date for fi in records)
+        curve_days = (today - curve_start).days + 1
+
+        # Build monthly points (daily is too heavy)
+        from .fi_calc import fd_cum_value_on
+        curve_labels: list[str] = []
+        curve_fi:     list[float] = []
+        curve_sav:    list[float] = []
+        curve_std_fd: list[float] = []
+        curve_inf:    list[float] = []
+
+        def _benchmark_value(rate: float, d: date) -> float:
+            return sum(
+                fd_cum_value_on(fi.amount, rate, fi.start_date, fi.maturity_date, d, "quarterly")
+                for fi in records if d >= fi.start_date
+            )
+
+        d = curve_start.replace(day=1)
+        while d <= today:
+            total_fi = sum(fi_value_on(fi, d) for fi in records)
+            curve_labels.append(d.isoformat())
+            curve_fi.append(round(total_fi, 2))
+            curve_sav.append(round(_benchmark_value(SAVINGS_RATE, d), 2))
+            curve_std_fd.append(round(_benchmark_value(STD_FD_RATE, d), 2))
+            curve_inf.append(round(_benchmark_value(INFLATION_RATE, d), 2))
+            d += relativedelta(months=1)
+
+        growth_curve = {
+            "labels": curve_labels,
+            "fi": curve_fi,
+            "savings": curve_sav,
+            "std_fd": curve_std_fd,
+            "inflation": curve_inf,
+            "savings_rate":   SAVINGS_RATE,
+            "std_fd_rate":    STD_FD_RATE,
+            "inflation_rate": INFLATION_RATE,
+        }
+    else:
+        growth_curve = {"labels": [], "fi": [], "savings": [], "inflation": [],
+                        "savings_rate": 4.0, "inflation_rate": 5.0}
+
+    return {
+        "maturity_timeline": timeline,
+        "cashflow_forecast": {"labels": cashflow_labels, "values": cashflow_values},
+        "fy_interest": fy_interest_data,
+        "growth_curve": growth_curve,
+    }
 
 
 # --- symbol aliases ---

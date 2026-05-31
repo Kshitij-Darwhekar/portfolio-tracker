@@ -18,6 +18,14 @@ Self-hosted personal finance dashboard for Indian equities (NSE/BSE) and mutual 
 - **Live NAV** — AMFI NAVAll.txt + mfapi.in historical NAV; cached daily
 - Full scheme name display (e.g. "Parag Parikh Flexi Cap Fund - Regular Plan Growth") with folio number
 
+### Fixed Income (FDs & RDs)
+- **Manual entry** for Bank FDs (cumulative & non-cumulative) and Recurring Deposits
+- **Correct Indian bank math** — cumulative FD: `P × (1 + r/n)^(n×t)` with quarterly compounding (RBI standard); RD: each instalment compounded for its remaining tenure
+- **Tax metrics** — interest accrued this financial year (taxable as income), TDS warning when aggregate FY interest from one bank exceeds ₹40,000
+- **Three FI-specific charts**: Portfolio growth curve vs configurable benchmarks (savings rate, standard FD rate, CPI inflation); Maturity Timeline (Gantt); Cashflow Forecast (next 24 months); FY Interest Income bar chart
+- **Configurable benchmark rates** stored in `data/fi_rates.json` — update savings rate, standard FD rate, and inflation without touching code
+- FI XIRR shown separately with appropriate benchmarks (savings/inflation) — not mixed into equity XIRR where NIFTY comparison would be meaningless
+
 ### Analytics
 - **Holdings table** — qty/units, avg cost, current price/NAV, invested, current value, P&L, % return, XIRR per holding; sortable by any column
 - **Portfolio XIRR** — correct benchmark comparison: same rupees, same dates, replayed into the index. Index sell proceeds use the index's actual value (not the stock's windfall price)
@@ -196,6 +204,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 | Version | Date | Highlights |
 |---|---|---|
+| **0.3.0** | 2026-05-31 | Fixed Income (FDs & RDs): interest math, TDS, growth curve, maturity timeline, favicon |
+| **0.2.2** | 2026-05-31 | Fix XIRR correctness regression from cache_only over-application |
 | **0.2.1** | 2026-05-31 | Performance: 220× faster holdings, 37× faster equity curve, two-phase loading |
 | **0.2.0** | 2026-05-31 | Mutual Funds (CAS import), segment filter, XIRR by period, STCG/LTCG P&L, collapsible UI |
 | **0.1.0** | 2026-05-31 | Initial release: equity tracking, corporate actions, XIRR vs benchmarks |

@@ -16,7 +16,14 @@ from .corporate_actions import (
     get_split_actions,
     qty_held_on,
 )
-from .db import CorporateAction, Instrument, Transaction
+from .db import CorporateAction, FixedIncome, Instrument, Transaction
+from .fi_calc import (
+    cashflows_for_xirr as fi_cashflows,
+    current_value as fi_current_value,
+    interest_earned_total,
+    interest_this_fy,
+    maturity_value as fi_maturity_value,
+)
 from .prices import (
     BENCHMARKS,
     fetch_benchmark_series,
@@ -364,6 +371,134 @@ def compute_period_xirr(
     }
 
 
+# ---------- Fixed Income (FD / RD) ----------
+
+TDS_THRESHOLD = 40_000.0   # ₹40,000 aggregate interest per bank per FY
+TDS_RATE      = 0.10       # 10% TDS (PAN linked)
+
+
+@dataclass
+class FIHoldingRow:
+    id: int
+    fi_type: str              # FD_CUM | FD_NON_CUM | RD
+    bank: str
+    account_no: str | None
+    amount: float             # principal (FD) or monthly instalment (RD)
+    start_date: date
+    maturity_date: date
+    interest_rate: float
+    compounding: str
+    payout_frequency: str | None
+    is_tax_saver: bool
+    notes: str | None
+    current_value: float
+    maturity_value: float
+    interest_earned: float    # total interest earned to date
+    interest_this_fy: float   # interest accrued this financial year (taxable)
+    tds_applicable: bool      # True when FY interest from this bank > ₹40k
+    tds_estimate: float       # estimated TDS at 10%
+    days_to_maturity: int     # negative = already matured
+    xirr: float | None
+
+
+def compute_fi_holdings(db: Session, today: date | None = None) -> list[FIHoldingRow]:
+    """Compute current values and tax metrics for all FD/RD records."""
+    today = today or date.today()
+    records = db.execute(select(FixedIncome).order_by(FixedIncome.start_date)).scalars().all()
+
+    # Aggregate FY interest per bank for TDS check
+    bank_fy_interest: dict[str, float] = defaultdict(float)
+    for fi in records:
+        bank_fy_interest[fi.bank.lower()] += interest_this_fy(fi, today)
+
+    rows: list[FIHoldingRow] = []
+    for fi in records:
+        cv     = fi_current_value(fi)
+        mv     = fi_maturity_value(fi)
+        ie     = interest_earned_total(fi, today)
+        fy_int = interest_this_fy(fi, today)
+        bank_total = bank_fy_interest[fi.bank.lower()]
+        tds_app = bank_total > TDS_THRESHOLD
+        tds_est = bank_total * TDS_RATE if tds_app else 0.0
+        dtm     = (fi.maturity_date - today).days
+        x       = xirr(fi_cashflows(fi)) if fi.start_date < today else None
+
+        rows.append(FIHoldingRow(
+            id=fi.id, fi_type=fi.fi_type, bank=fi.bank, account_no=fi.account_no,
+            amount=fi.amount, start_date=fi.start_date, maturity_date=fi.maturity_date,
+            interest_rate=fi.interest_rate, compounding=fi.compounding,
+            payout_frequency=fi.payout_frequency, is_tax_saver=fi.is_tax_saver,
+            notes=fi.notes, current_value=cv, maturity_value=mv,
+            interest_earned=ie, interest_this_fy=fy_int,
+            tds_applicable=tds_app, tds_estimate=tds_est,
+            days_to_maturity=dtm, xirr=x,
+        ))
+    return rows
+
+
+def compute_fi_summary(db: Session, today: date | None = None) -> dict:
+    """Summary statistics for the Fixed Income portfolio."""
+    today = today or date.today()
+    rows = compute_fi_holdings(db, today)
+    active   = [r for r in rows if r.days_to_maturity >= 0]
+    matured  = [r for r in rows if r.days_to_maturity < 0]
+
+    # For RDs: invested = instalments paid so far + initial deposit (if any).
+    # +1 because the start month itself is instalment 0 (paid on start date).
+    fi_records = {r.id: r for r in db.execute(select(FixedIncome)).scalars().all()}
+    from .fi_calc import rd_tenure_months as _rd_months
+    total_invested = 0.0
+    for r in rows:
+        if r.fi_type != "RD":
+            total_invested += r.amount
+        else:
+            n_paid = min(
+                max(0, (today.year - r.start_date.year) * 12 +
+                        (today.month - r.start_date.month) + 1),
+                _rd_months(r.start_date, r.maturity_date)
+            )
+            fi_rec = fi_records.get(r.id)
+            init = (fi_rec.initial_deposit or 0.0) if fi_rec else 0.0
+            total_invested += r.amount * n_paid + init
+    total_current  = sum(r.current_value for r in rows)
+    total_fy_int   = sum(r.interest_this_fy for r in rows)
+
+    # TDS per bank
+    bank_fy: dict[str, float] = defaultdict(float)
+    for r in rows:
+        bank_fy[r.bank] += r.interest_this_fy
+    tds_banks = [
+        {"bank": b, "fy_interest": v, "tds": v * TDS_RATE}
+        for b, v in bank_fy.items() if v > TDS_THRESHOLD
+    ]
+
+    # Portfolio XIRR for FI only
+    all_flows: list[tuple[date, float]] = []
+    for fi in db.execute(select(FixedIncome)).scalars().all():
+        all_flows.extend(fi_cashflows(fi))
+    fi_xirr = xirr(all_flows) if all_flows else None
+
+    return {
+        "total_invested":    total_invested,
+        "total_current":     total_current,
+        "total_interest_earned": total_current - total_invested,
+        "total_fy_interest": total_fy_int,
+        "active_count":      len(active),
+        "matured_count":     len(matured),
+        "fi_xirr":           fi_xirr,
+        "tds_warnings":      tds_banks,
+        "as_of":             today.isoformat(),
+    }
+
+
+def fi_cashflows_all(db: Session) -> list[tuple[date, float]]:
+    """All FI cashflows for inclusion in combined portfolio XIRR."""
+    flows: list[tuple[date, float]] = []
+    for fi in db.execute(select(FixedIncome)).scalars().all():
+        flows.extend(fi_cashflows(fi))
+    return flows
+
+
 # ---------- data quality ----------
 
 def find_orphan_sells(db: Session) -> list[dict]:
@@ -539,12 +674,15 @@ def compute_realized_pnl_by_period(
 
 # ---------- portfolio-level summary ----------
 
-def portfolio_cashflows(db: Session, txns: list[Transaction]) -> list[tuple[date, float]]:
+def portfolio_cashflows(
+    db: Session, txns: list[Transaction], include_fi: bool = False
+) -> list[tuple[date, float]]:
     """Cashflows from the investor's perspective including dividends.
 
     Buy:      outflow of (qty*price + fees)  → negative
     Sell:     inflow  of (qty*price - fees)  → positive
     Dividend: inflow  of qty_held * ₹/share  → positive
+    FI:       included when include_fi=True (combined portfolio view)
     """
     flows: list[tuple[date, float]] = []
     for t in txns:
@@ -562,6 +700,9 @@ def portfolio_cashflows(db: Session, txns: list[Transaction]) -> list[tuple[date
         div_flows = dividend_cashflows(db, sym, group, split_actions)
         flows.extend(div_flows)
 
+    if include_fi:
+        flows.extend(fi_cashflows_all(db))
+
     return flows
 
 
@@ -574,11 +715,35 @@ def compute_summary(db: Session, today: date | None = None, segment: str | None 
     unrealized = current_value - invested if invested else 0
     total_pnl = realized + unrealized
 
+    # Add FI to the combined wealth picture (invested + current value only, NOT XIRR)
+    fi_invested = 0.0
+    fi_current  = 0.0
+    if segment is None:   # combined "All" view
+        fi_rows    = compute_fi_holdings(db, today)
+        from .fi_calc import rd_tenure_months as _rd_months
+        fi_invested = sum(
+            r.amount if r.fi_type != "RD"
+            else r.amount * min(
+                max(0, (today.year - r.start_date.year) * 12 +
+                        (today.month - r.start_date.month) + 1),  # +1: start month counts
+                _rd_months(r.start_date, r.maturity_date)
+            )
+            for r in fi_rows
+        )
+        fi_current  = sum(r.current_value for r in fi_rows)
+        invested     += fi_invested
+        current_value += fi_current
+        total_pnl    += (fi_current - fi_invested)
+
     q = select(Transaction)
     if segment:
         q = q.where(Transaction.segment == segment)
     txns = db.execute(q).scalars().all()
-    flows = portfolio_cashflows(db, txns)
+    # XIRR is computed per asset class only — FDs are NOT mixed into equity/MF XIRR.
+    # Reason: the NIFTY benchmark comparison only makes sense for market-linked assets.
+    # FD returns (guaranteed ~7%) would distort the comparison in both directions.
+    # FI contributes to the wealth SUMMARY (invested/current value) but not to XIRR.
+    flows = portfolio_cashflows(db, txns, include_fi=False)
     if current_value > 0:
         flows.append((today, current_value))
     portfolio_xirr = xirr(flows)
