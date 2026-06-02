@@ -204,6 +204,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 | Version | Date | Highlights |
 |---|---|---|
+| **0.4.1** | 2026-06-02 | SIP scheduler (AMFI NAV, stamp duty, preview mode), Canara Robeco PDF import, switch cost basis |
 | **0.4.0** | 2026-06-01 | EPF passbook import, Global Equities (INDMoney), Bonds/SGB, Net Worth dashboard, asset class categorisation |
 | **0.3.0** | 2026-05-31 | Fixed Income (FDs & RDs): interest math, TDS, growth curve, maturity timeline, favicon |
 | **0.2.2** | 2026-05-31 | Fix XIRR correctness regression from cache_only over-application |
@@ -212,6 +213,14 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 | **0.1.0** | 2026-05-31 | Initial release: equity tracking, corporate actions, XIRR vs benchmarks |
 
 ---
+
+### SIP Scheduler
+- Register recurring SIPs once (ISIN, amount, day of month, start date) — re-import monthly with one click instead of downloading a new CAS
+- **Preview before commit**: shows every transaction with exact AMFI NAV, units, stamp duty, holiday adjustment — nothing writes to the DB until you confirm
+- Stamp duty (0.005% SEBI-mandated) applied automatically — matches official CAS values to 4 decimal places
+- Holiday handling: uses AMFI NAV absence as the holiday detector; automatically shifts to next trading day
+- Safe to run alongside CAS imports — deduplicates against already-imported transactions
+- Supports regular and direct plans via plan-specific ISIN
 
 ### EPF
 - **EPFO Member Passbook PDF import** — handles CAMS+KFintech format including page-break splits; PII (UAN, Member ID, Name) never stored

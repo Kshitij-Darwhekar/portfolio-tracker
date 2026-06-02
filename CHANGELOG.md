@@ -5,6 +5,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.4.1] — 2026-06-02
+
+### Added
+- **SIP Scheduler** — register recurring SIPs once, auto-import monthly using official AMFI NAV
+  - Preview mode: shows every transaction with exact NAV, units, stamp duty, holiday adjustment before committing — nothing touches the DB until you confirm
+  - Correct stamp duty: 0.005% SEBI-mandated deduction applied to all SIPs (e.g. ₹3,000 → ₹2,999.85 net; matches official CAS values to 4 decimal places)
+  - Holiday handling: uses AMFI NAV absence as the holiday detector — if a SIP date has no NAV published, automatically uses the next trading day's NAV (same logic fund houses use for allotment)
+  - Deduplication: skips SIPs already imported from CAS using ±3-day window + approximate amount match — safe to use even after importing a CAS that covers the same period
+  - Regular vs Direct funds: just use the plan-specific ISIN; AMFI returns the correct NAV automatically
+  - SIP Schedules section under Mutual Funds tab with table, per-schedule Preview, global Sync All button
+  - Endpoints: `GET/POST/PATCH/DELETE /api/sip-schedules`, `GET /{id}/preview`, `POST /{id}/confirm`, `POST /sync-all`
+- **Canara Robeco MF import** — one-time direct PDF parser for KFintech account statement format
+  - 50 transactions: 45 monthly SIPs (₹1,000, Feb 2022–Jan 2026), 2 lump-sum purchases, 1 Lateral Shift Out (switch to Large Mid Cap), 1 Lateral Shift In, 1 post-switch SIP
+  - Handles page-break transaction splits (date on one page, amounts on next)
+  - Folio 17738223505 — was missing from Combined CAS because it was registered under a different phone number/email
+
+### Fixed
+- **Switch cost basis explanation** — the ₹1,482 "invested" discrepancy between dashboard and INDMoney is the unrealised gain made on Canara Robeco Large Cap before switching. INDMoney preserves original purchase cost through switches; the dashboard records switch-in at market value. Documented in `_is_transfer()` and `compute_bank_invested()` helpers
+- **`_is_transfer()` helper** — correctly identifies Lateral Shift In/Out, Switch Over In/Out, STP In/Out as portfolio redeployments (not bank outflows)
+
+---
+
 ## [0.4.0] — 2026-06-01
 
 ### Added
