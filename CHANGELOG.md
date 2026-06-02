@@ -5,6 +5,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.4.2] — 2026-06-02
+
+### Added
+- **NW Actual Milestone Dots** — overlay your real net worth checkpoints (from personal tracking spreadsheet) on the Net Worth Journey chart as yellow dots, so you can immediately see where the computed historical line matches your actual records
+  - `NWSnapshot` table stores date + amount + label; seeded with 8 milestones from Sheet2 of the Excel tracker (Feb 2022 start → May 2026 ₹8.02L)
+  - Endpoints: `GET/POST/DELETE /api/nw-snapshots`
+  - Dots aligned by year-month (not exact date) so "2024-07-08" correctly maps to the "2024-07" point on the monthly chart
+
+### Fixed
+- **Net Worth projection rate** — was using trailing 1-year XIRR which produced 529% (Canara Robeco historical imports flooded the 12-month window). Now uses all-time portfolio XIRR (~12%) which correctly projects ₹13.5L by 2029 instead of the incorrect ₹30.77L. Clamped to 30% max (was 50%)
+- **Projection horizon** — extended from 36 months to 60 months (5 years) so the compounding curve shape is more visible
+- **NW XIRR** — was `NameError: NWSnapshot not defined` because `NWSnapshot` was missing from `networth.py` imports
+- **NW milestone dots** — only 1 dot appeared because exact date matching failed for non-month-start dates (e.g. "2024-07-08" didn't match label "2024-07-01"); fixed by matching on year-month prefix
+- **NW XIRR variable name** — `txns` referenced before assignment in `compute_networth`; corrected to `all_txns`
+
+### Changed
+- Net Worth projection subtitle now shows: `"projected at 11.95% p.a. (all-time portfolio XIRR) · EPF at 8.25% · dots = your actual records"`
+
+---
+
 ## [0.4.1] — 2026-06-02
 
 ### Added

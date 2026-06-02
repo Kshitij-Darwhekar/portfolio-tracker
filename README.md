@@ -204,6 +204,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 | Version | Date | Highlights |
 |---|---|---|
+| **0.4.2** | 2026-06-02 | NW actual milestone dots, projection rate fix (12% all-time XIRR), 5-year horizon |
 | **0.4.1** | 2026-06-02 | SIP scheduler (AMFI NAV, stamp duty, preview mode), Canara Robeco PDF import, switch cost basis |
 | **0.4.0** | 2026-06-01 | EPF passbook import, Global Equities (INDMoney), Bonds/SGB, Net Worth dashboard, asset class categorisation |
 | **0.3.0** | 2026-05-31 | Fixed Income (FDs & RDs): interest math, TDS, growth curve, maturity timeline, favicon |

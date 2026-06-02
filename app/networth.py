@@ -17,13 +17,15 @@ from dateutil.relativedelta import relativedelta
 from sqlalchemy import select, desc as sa_desc
 from sqlalchemy.orm import Session
 
-from .db import BondDetail, EPFEntry, FixedIncome, Instrument, PriceCache, Transaction
+from sqlalchemy import select as select  # re-export for local use
+from .db import BondDetail, EPFEntry, FixedIncome, Instrument, NWSnapshot, PriceCache, Transaction
+from .xirr import xirr as compute_xirr
 from .fi_calc import value_on as fi_value_on
 
 log = logging.getLogger(__name__)
 
 EPF_RATE      = 8.25   # current EPF interest rate % p.a. (update when govt announces)
-PROJ_MONTHS   = 36     # months to project into future
+PROJ_MONTHS   = 60     # months to project into future (5 years — enough to see compounding shape)
 EQUITY_FALLBACK_RATE = 12.0  # % p.a. if XIRR can't be computed
 
 # Standard Indian wealth milestones (₹)
@@ -142,22 +144,25 @@ def compute_networth(db: Session) -> dict:
         })
         d += relativedelta(months=1)
 
-    # Growth rate for equity projection (trailing 1-year XIRR, else fallback)
+    # Growth rate for equity projection — use ALL-TIME portfolio XIRR.
+    # The trailing 1-year XIRR is too volatile (historical imports can produce
+    # 500%+ due to recently-added old transactions), so we use the full history
+    # which gives a stable, realistic long-run rate.
+    # Clamped to [0%, 30%] — 30% is already very optimistic for long-run equity.
     try:
-        one_yr_ago = today - timedelta(days=365)
-        txns_1y = [t for t in all_txns if t.trade_date >= one_yr_ago and t.segment in ("EQ", "MF")]
-        if len(txns_1y) >= 2:
-            from .analytics import portfolio_cashflows
-            flows = portfolio_cashflows(db, txns_1y, include_fi=False)
+        from .analytics import portfolio_cashflows
+        all_eq_mf_txns = [t for t in all_txns if t.segment in ("EQ", "MF")]
+        if len(all_eq_mf_txns) >= 2:
+            flows_for_rate = portfolio_cashflows(db, all_eq_mf_txns, include_fi=False)
             if (eq_val + mf_val) > 0:
-                flows.append((today, eq_val + mf_val))
-            eq_growth = compute_xirr(flows) or (EQUITY_FALLBACK_RATE / 100)
+                flows_for_rate.append((today, eq_val + mf_val))
+            eq_growth = compute_xirr(flows_for_rate) or (EQUITY_FALLBACK_RATE / 100)
         else:
             eq_growth = EQUITY_FALLBACK_RATE / 100
     except Exception:
         eq_growth = EQUITY_FALLBACK_RATE / 100
 
-    eq_growth = min(max(eq_growth, 0.0), 0.50)  # clamp to [0%, 50%]
+    eq_growth = min(max(eq_growth, 0.0), 0.30)  # clamp to [0%, 30%]
 
     # EPF monthly contribution (use average of last 3 months)
     recent_epf = sorted(
@@ -247,6 +252,60 @@ def compute_networth(db: Session) -> dict:
         "other":   "#444c56",
     }
 
+    # ---- Total Net Worth XIRR (Personal Rate of Return across all asset classes) ----
+    # Aggregates every cashflow: EQ+MF purchases/sales, FI deposits, EPF contributions,
+    # bond purchases, global equity (converted to INR). Terminal value = today's total NW.
+    # This answers: "at what annualized rate has every rupee I've invested been compounding?"
+    nw_xirr = None
+    try:
+        from .analytics import portfolio_cashflows, fi_cashflows_all
+        from .db import BondDetail as _BD, GlobalEquityTransaction as _GET
+
+        all_flows: list[tuple[date, float]] = []
+
+        # Equity + MF (INR cashflows, switches excluded)
+        all_flows.extend(portfolio_cashflows(db, all_txns, include_fi=False))
+
+        # Fixed Income (FDs/RDs) — deterministic
+        all_flows.extend(fi_cashflows_all(db))
+
+        # EPF — employee + employer contributions as outflows, current balance as terminal
+        from .db import EPFEntry as _EPF
+        epf_rows = db.execute(select(_EPF).order_by(_EPF.month)).scalars().all()
+        for e in epf_rows:
+            if e.entry_type == "contribution":
+                total_contribution = e.employee_share + e.employer_share
+                if total_contribution > 0:
+                    all_flows.append((e.month, -total_contribution))
+
+        # Bonds (SGBs etc.) — purchase as outflow, current value as inflow
+        for bd in db.execute(select(_BD)).scalars().all():
+            qty = bd.quantity or 0
+            if qty > 0:
+                cost = qty * (bd.purchase_price or bd.issue_price)
+                ref_date = bd.purchase_date or bd.issue_date
+                all_flows.append((ref_date, -cost))
+                # Current value as part of terminal (already in `total`)
+
+        # Global equity — convert USD to INR using stored exchange rates
+        ge_rows = db.execute(select(_GET).order_by(_GET.trade_date)).scalars().all()
+        for t in ge_rows:
+            rate = t.exchange_rate or 84.0
+            inr  = t.amount_usd * rate
+            if t.trade_type == "buy":
+                all_flows.append((t.trade_date, -inr))
+            else:
+                all_flows.append((t.trade_date, inr))
+
+        # Terminal value = today's total net worth (all assets)
+        if total > 0:
+            all_flows.append((today, total))
+
+        if all_flows:
+            nw_xirr = compute_xirr(all_flows)
+    except Exception as _e:
+        log.debug("NW XIRR failed: %s", _e)
+
     return {
         "current": {
             "equity": round(eq_val, 2),
@@ -256,6 +315,7 @@ def compute_networth(db: Session) -> dict:
             "bonds":  round(bond_val, 2),
             "total":  round(total, 2),
         },
+        "nw_xirr": nw_xirr,
         "allocation": {
             "equity": pct(eq_val),
             "mf":     pct(mf_val),
@@ -276,6 +336,13 @@ def compute_networth(db: Session) -> dict:
             "epf_monthly":        round(epf_monthly, 2),
         },
         "as_of": today.isoformat(),
+        # User-recorded actual NW checkpoints (from personal tracking spreadsheet)
+        "snapshots": [
+            {"date": s.snap_date.isoformat(), "amount": s.amount, "label": s.label}
+            for s in db.execute(
+                select(NWSnapshot).order_by(NWSnapshot.snap_date)
+            ).scalars().all()
+        ],
     }
 
 

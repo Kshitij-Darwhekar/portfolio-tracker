@@ -26,7 +26,7 @@ from .analytics import (
 from .corporate_actions import auto_fetch_all
 from .fi_rates import load_fi_rates, update_fi_rate
 from .db import (BondDetail, CorporateAction, EPFEntry, FixedIncome,
-                 GlobalEquityTransaction, SIPSchedule, Transaction,
+                 GlobalEquityTransaction, NWSnapshot, SIPSchedule, Transaction,
                  get_session, init_db)
 from .importer import import_tradebook
 from .bond_analytics import compute_bond_holdings
@@ -826,6 +826,46 @@ def delete_bond_detail(bond_id: int, db: Session = Depends(get_session)):
         raise HTTPException(404, "Not found")
     db.delete(b)
     db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/nw-snapshots")
+def list_nw_snapshots(db: Session = Depends(get_session)):
+    rows = db.execute(select(NWSnapshot).order_by(NWSnapshot.snap_date)).scalars().all()
+    return [{
+        "id": r.id, "snap_date": r.snap_date.isoformat(),
+        "amount": r.amount, "label": r.label, "notes": r.notes,
+    } for r in rows]
+
+
+class NWSnapshotIn(BaseModel):
+    snap_date: date
+    amount:    float = Field(gt=0)
+    label:     str | None = None
+    notes:     str | None = None
+
+
+@app.post("/api/nw-snapshots")
+def create_nw_snapshot(payload: NWSnapshotIn, db: Session = Depends(get_session)):
+    existing = db.execute(
+        select(NWSnapshot).where(NWSnapshot.snap_date == payload.snap_date)
+    ).scalar_one_or_none()
+    if existing:
+        existing.amount = payload.amount
+        existing.label  = payload.label
+        existing.notes  = payload.notes
+        db.commit()
+        return {"id": existing.id, "updated": True}
+    row = NWSnapshot(**payload.model_dump())
+    db.add(row); db.commit(); db.refresh(row)
+    return {"id": row.id, "created": True}
+
+
+@app.delete("/api/nw-snapshots/{snap_id}")
+def delete_nw_snapshot(snap_id: int, db: Session = Depends(get_session)):
+    r = db.get(NWSnapshot, snap_id)
+    if not r: raise HTTPException(404, "Not found")
+    db.delete(r); db.commit()
     return {"ok": True}
 
 

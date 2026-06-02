@@ -175,6 +175,19 @@ async function loadNetWorth() {
 
     // Headline total
     document.getElementById("nw-total").textContent = fmtINR(c.total);
+
+    // Net Worth XIRR — overall Personal Rate of Return across all asset classes
+    const xirrEl = document.getElementById("nw-xirr");
+    if (xirrEl) {
+      if (nw.nw_xirr != null) {
+        const xpct = (nw.nw_xirr * 100).toFixed(2);
+        xirrEl.innerHTML =
+          `<span class="${nw.nw_xirr >= 0 ? 'pos' : 'neg'}">${xpct}% p.a.</span>` +
+          ` <span class="muted small">overall XIRR (all assets)</span>`;
+      } else {
+        xirrEl.textContent = "";
+      }
+    }
     document.getElementById("nw-asof").textContent  = `As of ${nw.as_of}`;
 
     nwData = nw;
@@ -182,8 +195,8 @@ async function loadNetWorth() {
 
     // Assumptions note
     const asmEl = document.getElementById("nw-assumptions");
-    if (asmEl && nw.assumptions.equity_growth_rate) {
-      asmEl.textContent = `equity projected at ${nw.assumptions.equity_growth_rate}% · EPF at ${nw.assumptions.epf_rate}%`;
+    if (asmEl && nw.assumptions?.equity_growth_rate) {
+      asmEl.textContent = `projected at ${nw.assumptions.equity_growth_rate}% p.a. (all-time portfolio XIRR) · EPF at ${nw.assumptions.epf_rate}% · dots = your actual records`;
     }
 
     // Projection chart with milestones
@@ -220,17 +233,36 @@ async function loadNetWorth() {
     // Register annotation plugin if available
     if (window.ChartAnnotation) Chart.register(window.ChartAnnotation);
 
+    // Overlay actual milestone snapshots — match by year-month since snapshot
+    // dates (e.g. 2024-07-08) won't exactly match chart labels (2024-07-01)
+    const snapshotData = (nw.snapshots || []).map(s => {
+      const snapYM = s.date.slice(0, 7);   // "YYYY-MM"
+      const idx = allLabels.findIndex(lbl => lbl.startsWith(snapYM));
+      return { x: s.date, y: s.amount, label: s.label, idx };
+    }).filter(s => s.idx >= 0);
+
+    // Build sparse array aligned to allLabels for snapshot dots
+    const snapshotY = allLabels.map((lbl, i) => {
+      const found = snapshotData.find(s => s.idx === i);
+      return found ? found.y : null;
+    });
+
     nwProjectionChart = new Chart(projCtx, {
       type: "line",
       data: {
         labels: allLabels,
         datasets: [
-          { label: "Historical", data: histFull,
+          { label: "Historical (computed)", data: histFull,
             borderColor: "#58a6ff", backgroundColor: "rgba(88,166,255,0.1)",
             borderWidth: 2, fill: true, pointRadius: 0, tension: 0.3, spanGaps: false },
           { label: "Projected", data: projFull,
             borderColor: "#a371f7", backgroundColor: "transparent",
             borderWidth: 1.5, borderDash: [5,4], pointRadius: 0, tension: 0.3, spanGaps: false },
+          { label: "Actual (your records)", data: snapshotY,
+            borderColor: "transparent", backgroundColor: "#f0c14b",
+            pointBackgroundColor: "#f0c14b", pointBorderColor: "#f0c14b",
+            pointRadius: 6, pointHoverRadius: 8,
+            borderWidth: 0, fill: false, spanGaps: false, showLine: false },
         ],
       },
       options: {

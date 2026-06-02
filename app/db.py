@@ -226,6 +226,22 @@ class BondDetail(Base):
     created_at       = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 
+class NWSnapshot(Base):
+    """User-recorded net worth on a specific date (from personal tracking).
+
+    Used to overlay actual data points on the NW projection chart, letting
+    the user see where the computed historical line matches their real records.
+    """
+    __tablename__ = "nw_snapshots"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    snap_date  = Column(Date, nullable=False, unique=True, index=True)
+    amount     = Column(Float, nullable=False)   # actual NW in ₹
+    label      = Column(String, nullable=True)   # e.g. "₹1L milestone"
+    notes      = Column(String, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 def init_db() -> None:
     Base.metadata.create_all(engine)
     # One-time migration: add folio column if not yet present
