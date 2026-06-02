@@ -779,6 +779,163 @@ globalForm?.addEventListener("submit", async (e) => {
   } catch (err) { alert("Save failed: " + err.message); }
 });
 
+// ---- SIP Schedules ----
+let sipPreviewScheduleId = null;
+
+async function loadSipSchedules() {
+  const sec = document.getElementById("sip-section");
+  if (!sec) return;
+  // Show only on MF tab
+  sec.style.display = activeSegment === "MF" ? "" : "none";
+  if (activeSegment !== "MF") return;
+
+  try {
+    const schedules = await api("/api/sip-schedules");
+    const tbody = document.querySelector("#sip-table tbody");
+    tbody.innerHTML = "";
+    for (const s of schedules) {
+      const status = s.is_active
+        ? `<span class="fi-badge active">Active</span>`
+        : `<span class="fi-badge matured">Paused</span>`;
+      tbody.innerHTML += `<tr>
+        <td><strong>${s.scheme_name || s.isin}</strong><br>
+          <span class="muted" style="font-size:11px">${s.isin}${s.folio ? ' · folio ' + s.folio : ''}</span></td>
+        <td class="num">${fmtINR(s.amount)}/mo</td>
+        <td class="num">${s.sip_day}th</td>
+        <td>${s.start_date}</td>
+        <td>${status}</td>
+        <td class="muted small">${s.last_synced_date || 'Never'}</td>
+        <td>
+          <button class="edit-btn sip-preview-btn" data-id="${s.id}">Preview</button>
+          <button class="delete-btn sip-del-btn" data-id="${s.id}">delete</button>
+        </td>
+      </tr>`;
+    }
+    if (!schedules.length) {
+      tbody.innerHTML = `<tr><td colspan="7" class="muted" style="text-align:center;padding:16px">
+        No SIP schedules yet. Add one to auto-import future SIPs using official AMFI NAV.</td></tr>`;
+    }
+  } catch (e) { console.error("SIP load error:", e); }
+}
+
+document.querySelector("#sip-table tbody")?.addEventListener("click", async (e) => {
+  const id = e.target.dataset.id;
+  if (!id) return;
+  if (e.target.classList.contains("sip-del-btn")) {
+    if (!confirm("Delete this SIP schedule? (Existing imported transactions are unaffected.)")) return;
+    await api(`/api/sip-schedules/${id}`, { method: "DELETE" });
+    await loadSipSchedules();
+  } else if (e.target.classList.contains("sip-preview-btn")) {
+    await showSipPreview(parseInt(id));
+  }
+});
+
+async function showSipPreview(schedId) {
+  const panel = document.getElementById("sip-preview-panel");
+  const title = document.getElementById("sip-preview-title");
+  const summary = document.getElementById("sip-preview-summary");
+  const tbody = document.querySelector("#sip-preview-table tbody");
+  panel.style.display = "";
+  title.textContent = "Loading preview…";
+  tbody.innerHTML = "";
+  summary.textContent = "";
+  sipPreviewScheduleId = schedId;
+
+  try {
+    const p = await api(`/api/sip-schedules/${schedId}/preview`);
+    title.textContent = `Preview: ${p.scheme_name}`;
+    summary.innerHTML =
+      `<span class="pos">${p.new} new transactions</span> · ` +
+      `<span class="muted">${p.skipped} already imported · ${p.no_nav} no NAV</span>`;
+
+    const STATUS_COLORS = { new: "pos", skipped: "muted", no_nav: "neg" };
+    for (const item of p.items) {
+      tbody.innerHTML += `<tr>
+        <td>${item.sip_date}</td>
+        <td>${item.allotment_date || '—'}</td>
+        <td class="num">${item.nav != null ? item.nav.toFixed(4) : '—'}</td>
+        <td class="num">${item.units != null ? item.units.toFixed(6) : '—'}</td>
+        <td class="num">${fmtINR(item.amount)}</td>
+        <td class="${STATUS_COLORS[item.status] || ''}">${item.status}</td>
+        <td class="muted small">${item.note || ''}</td>
+      </tr>`;
+    }
+    panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } catch (e) {
+    title.textContent = "Preview failed";
+    summary.innerHTML = `<span class="neg">${escapeHtml(e.message)}</span>`;
+  }
+}
+
+document.getElementById("btn-sip-cancel-preview")?.addEventListener("click", () => {
+  document.getElementById("sip-preview-panel").style.display = "none";
+  sipPreviewScheduleId = null;
+});
+
+document.getElementById("btn-sip-confirm")?.addEventListener("click", async () => {
+  if (!sipPreviewScheduleId) return;
+  const btn = document.getElementById("btn-sip-confirm");
+  btn.disabled = true; btn.textContent = "Importing…";
+  try {
+    const r = await api(`/api/sip-schedules/${sipPreviewScheduleId}/confirm`, { method: "POST" });
+    document.getElementById("sip-sync-result").innerHTML =
+      `<span class="pos">✓ Imported ${r.inserted} new transactions, ${r.skipped} already existed.</span>`;
+    document.getElementById("sip-preview-panel").style.display = "none";
+    sipPreviewScheduleId = null;
+    await Promise.all([loadSipSchedules(), loadHoldings(), loadSummary()]);
+  } catch (e) {
+    document.getElementById("sip-sync-result").innerHTML =
+      `<span class="neg">✗ ${escapeHtml(e.message)}</span>`;
+  } finally { btn.disabled = false; btn.textContent = "Confirm & Import"; }
+});
+
+document.getElementById("btn-sip-sync-all")?.addEventListener("click", async () => {
+  const btn = document.getElementById("btn-sip-sync-all");
+  const resultEl = document.getElementById("sip-sync-result");
+  btn.disabled = true; btn.textContent = "Syncing…";
+  resultEl.innerHTML = `<span class="muted">Fetching NAVs from AMFI…</span>`;
+  try {
+    const r = await api("/api/sip-schedules/sync-all", { method: "POST" });
+    resultEl.innerHTML =
+      `<span class="pos">✓ ${r.total_inserted} new transactions imported across ${r.schedules_processed} schedules.</span>`;
+    await Promise.all([loadSipSchedules(), loadHoldings(), loadSummary()]);
+  } catch (e) {
+    resultEl.innerHTML = `<span class="neg">✗ ${escapeHtml(e.message)}</span>`;
+  } finally { btn.disabled = false; btn.textContent = "Sync All SIPs"; }
+});
+
+// SIP Add modal
+const sipDialog = document.getElementById("sip-dialog");
+const sipForm   = document.getElementById("sip-form");
+document.getElementById("btn-sip-add")?.addEventListener("click", () => {
+  sipForm.reset(); sipDialog.showModal();
+});
+document.getElementById("sip-cancel")?.addEventListener("click", (e) => {
+  e.preventDefault(); sipDialog.close();
+});
+sipForm?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const fd = new FormData(sipForm);
+  const payload = {
+    isin:         fd.get("isin").toUpperCase().trim(),
+    scheme_name:  fd.get("scheme_name") || null,
+    folio:        fd.get("folio") || null,
+    amount:       parseFloat(fd.get("amount")),
+    sip_day:      parseInt(fd.get("sip_day")),
+    start_date:   fd.get("start_date") || null,
+    end_date:     fd.get("end_date") || null,
+    notes:        fd.get("notes") || null,
+  };
+  try {
+    await api("/api/sip-schedules", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    sipDialog.close();
+    await loadSipSchedules();
+  } catch (err) { alert("Save failed: " + err.message); }
+});
+
 // ---- FI benchmark rates editor ----
 async function openFiRatesEditor() {
   const rates = await api("/api/fi/rates");
@@ -2035,6 +2192,7 @@ async function refreshAll(tabSwitch = false) {
     loadHoldings(),
     loadFiHoldings(),    // pure math — no API calls, always fast
     loadFiCharts(),      // pure math — maturity timeline + cashflow forecast + FY interest
+    loadSipSchedules(),  // DB read only — fast
     loadRealizedPnl(realizedPeriod),
     loadDataQuality(),
   ];

@@ -26,9 +26,11 @@ from .analytics import (
 from .corporate_actions import auto_fetch_all
 from .fi_rates import load_fi_rates, update_fi_rate
 from .db import (BondDetail, CorporateAction, EPFEntry, FixedIncome,
-                 GlobalEquityTransaction, Transaction, get_session, init_db)
+                 GlobalEquityTransaction, SIPSchedule, Transaction,
+                 get_session, init_db)
 from .importer import import_tradebook
 from .bond_analytics import compute_bond_holdings
+from .sip_processor import commit_sip_schedule, preview_sip_schedule
 from .categorizer import auto_detect_category, ensure_all_categorised
 from .global_equity_analytics import (
     compute_global_equity_curve,
@@ -1027,6 +1029,139 @@ def delete_fi(fi_id: int, db: Session = Depends(get_session)):
     db.delete(fi)
     db.commit()
     return {"ok": True}
+
+
+@app.get("/api/sip-schedules")
+def list_sip_schedules(db: Session = Depends(get_session)):
+    rows = db.execute(select(SIPSchedule).order_by(SIPSchedule.created_at.desc())).scalars().all()
+    return [{
+        "id": s.id, "isin": s.isin, "scheme_name": s.scheme_name,
+        "folio": s.folio, "amount": s.amount, "sip_day": s.sip_day,
+        "start_date": s.start_date.isoformat(),
+        "end_date": s.end_date.isoformat() if s.end_date else None,
+        "is_active": s.is_active,
+        "last_synced_date": s.last_synced_date.isoformat() if s.last_synced_date else None,
+        "notes": s.notes,
+    } for s in rows]
+
+
+class SIPScheduleIn(BaseModel):
+    isin:         str
+    scheme_name:  str | None = None
+    folio:        str | None = None
+    amount:       float = Field(gt=0)
+    sip_day:      int = Field(ge=1, le=28)
+    start_date:   date | None = None   # optional — defaults to today
+    end_date:     date | None = None
+    is_active:    bool = True
+    notes:        str | None = None
+
+
+@app.post("/api/sip-schedules")
+def create_sip_schedule(payload: SIPScheduleIn, db: Session = Depends(get_session)):
+    today = date.today()
+    sched = SIPSchedule(
+        isin        = payload.isin.strip(),
+        scheme_name = payload.scheme_name,
+        folio       = payload.folio,
+        amount      = payload.amount,
+        sip_day     = payload.sip_day,
+        start_date  = payload.start_date or today,
+        end_date    = payload.end_date,
+        is_active   = payload.is_active,
+        notes       = payload.notes,
+    )
+    db.add(sched)
+    db.commit()
+    db.refresh(sched)
+    # Try to resolve scheme name from AMFI if not provided
+    if not sched.scheme_name:
+        from .prices import resolve_mf_scheme_code, _load_amfi_index
+        amfi = _load_amfi_index()
+        # scheme_name resolution — best effort
+    return {"id": sched.id, "start_date": sched.start_date.isoformat()}
+
+
+@app.patch("/api/sip-schedules/{sched_id}")
+def update_sip_schedule(sched_id: int, payload: SIPScheduleIn,
+                         db: Session = Depends(get_session)):
+    s = db.get(SIPSchedule, sched_id)
+    if not s:
+        raise HTTPException(404, "Not found")
+    for k, v in payload.model_dump(exclude_none=True).items():
+        setattr(s, k, v)
+    db.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/sip-schedules/{sched_id}")
+def delete_sip_schedule(sched_id: int, db: Session = Depends(get_session)):
+    s = db.get(SIPSchedule, sched_id)
+    if not s:
+        raise HTTPException(404, "Not found")
+    db.delete(s)
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/sip-schedules/{sched_id}/preview")
+def preview_sip(sched_id: int, db: Session = Depends(get_session)):
+    """Show exactly what transactions would be created — no DB changes.
+    Review this before calling /confirm.
+    """
+    s = db.get(SIPSchedule, sched_id)
+    if not s:
+        raise HTTPException(404, "Not found")
+    items = preview_sip_schedule(db, s)
+    new_count     = sum(1 for i in items if i["status"] == "new")
+    skipped_count = sum(1 for i in items if i["status"] == "skipped")
+    no_nav_count  = sum(1 for i in items if i["status"] == "no_nav")
+    return {
+        "schedule_id":   sched_id,
+        "scheme_name":   s.scheme_name or s.isin,
+        "total_items":   len(items),
+        "new":           new_count,
+        "skipped":       skipped_count,
+        "no_nav":        no_nav_count,
+        "items":         items,
+    }
+
+
+@app.post("/api/sip-schedules/{sched_id}/confirm")
+def confirm_sip(sched_id: int, db: Session = Depends(get_session)):
+    """Commit the previewed transactions to the database.
+    Only call this after reviewing /preview and confirming the values look correct.
+    """
+    s = db.get(SIPSchedule, sched_id)
+    if not s:
+        raise HTTPException(404, "Not found")
+    result = commit_sip_schedule(db, s)
+    return result
+
+
+@app.post("/api/sip-schedules/sync-all")
+def sync_all_sips(db: Session = Depends(get_session)):
+    """Sync all active SIP schedules at once.
+    Returns a combined summary — no preview, commits directly.
+    Use /preview first to verify individual schedules before using this.
+    """
+    schedules = db.execute(
+        select(SIPSchedule).where(SIPSchedule.is_active == True)
+    ).scalars().all()
+    total_inserted = 0
+    total_skipped  = 0
+    results = []
+    for s in schedules:
+        r = commit_sip_schedule(db, s)
+        total_inserted += r["inserted"]
+        total_skipped  += r["skipped"]
+        results.append({"id": s.id, "scheme": s.scheme_name or s.isin, **r})
+    return {
+        "schedules_processed": len(schedules),
+        "total_inserted": total_inserted,
+        "total_skipped":  total_skipped,
+        "detail": results,
+    }
 
 
 @app.get("/api/fi/rates")

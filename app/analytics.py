@@ -706,6 +706,45 @@ def portfolio_cashflows(
     return flows
 
 
+def _is_transfer(txn: Transaction) -> bool:
+    """True if a transaction is a switch/transfer (not a cash flow from/to bank).
+
+    Switches: Switch Over In/Out, Lateral Shift In/Out, STP In/Out.
+    These move money between funds but no new money enters/leaves the bank account.
+    They should NOT count toward 'invested' (what actually came from your pocket).
+    """
+    notes = (txn.notes or "").lower()
+    return any(kw in notes for kw in (
+        "lateral shift in", "lateral shift out",
+        "switch over in", "switch over out",
+        "switch in", "switch out",
+        "stp in", "stp out",
+    ))
+
+
+def compute_bank_invested(txns: list[Transaction]) -> float:
+    """Total money ever paid from bank — gross invested (INDMoney-style).
+
+    Counts only PURCHASE cash flows (SIPs, lump sums) that originated from
+    the bank. Switches/transfers are excluded because no new money left the bank.
+    Redemption proceeds are NOT subtracted — this matches INDMoney's definition
+    of "invested" which shows lifetime gross deployment, not net.
+
+    Example:
+      Invest ₹1,000 in Fund A (bank outflow)  → invested = ₹1,000
+      Switch Fund A → Fund B (no bank flow)    → invested = ₹1,000  ✓
+      Redeem Fund B for ₹1,200 (bank inflow)   → invested = ₹1,000  ✓ (not ₹0)
+    """
+    total = 0.0
+    for t in txns:
+        if _is_transfer(t):
+            continue
+        if t.trade_type == "buy":
+            total += t.quantity * t.price + t.fees
+        # Sells/redemptions deliberately not subtracted — gross definition
+    return total
+
+
 def compute_summary(db: Session, today: date | None = None, segment: str | None = None) -> dict:
     today = today or date.today()
     holdings = compute_holdings(db, today, segment=segment)
@@ -718,7 +757,7 @@ def compute_summary(db: Session, today: date | None = None, segment: str | None 
     unrealized = current_value - invested if invested else 0
     total_pnl = realized + unrealized
 
-    # Add FI to the wealth DISPLAY numbers (invested, current, P&L on summary cards).
+    # Add FI to wealth display numbers. FI has no switches so bank_invested = full amount.
     # FI is intentionally excluded from XIRR — its cashflows would distort the
     # NIFTY benchmark comparison which only applies to market-linked assets.
     fi_invested = 0.0

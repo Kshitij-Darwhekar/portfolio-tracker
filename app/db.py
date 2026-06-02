@@ -144,6 +144,32 @@ class EPFEntry(Base):
     )
 
 
+class SIPSchedule(Base):
+    """Recurring SIP schedule for automatic transaction generation.
+
+    The processor generates one MF Transaction per due SIP date using the
+    official AMFI NAV from mfapi.in. If the SIP date is a market holiday,
+    the next available trading day's NAV is used automatically.
+
+    start_date is optional (defaults to today) so you can register future
+    SIPs without affecting existing CAS-imported history.
+    """
+    __tablename__ = "sip_schedules"
+
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    isin             = Column(String, nullable=False, index=True)
+    scheme_name      = Column(String, nullable=True)
+    folio            = Column(String, nullable=True)
+    amount           = Column(Float, nullable=False)        # ₹ per instalment
+    sip_day          = Column(Integer, nullable=False)      # day of month 1-28
+    start_date       = Column(Date, nullable=False)         # first SIP date
+    end_date         = Column(Date, nullable=True)          # None = ongoing
+    is_active        = Column(Boolean, nullable=False, default=True)
+    last_synced_date = Column(Date, nullable=True)          # last processed date
+    notes            = Column(String, nullable=True)
+    created_at       = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 class GlobalEquityTransaction(Base):
     """US / international stock transaction in USD (via INDMoney / Alpaca)."""
     __tablename__ = "global_equity_transactions"

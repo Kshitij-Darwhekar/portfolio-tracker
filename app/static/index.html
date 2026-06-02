@@ -418,6 +418,61 @@
       </div>
     </section>
 
+    <!-- SIP Schedules — shown when MF tab is active -->
+    <section class="card collapsible" data-section="sip" id="sip-section" style="display:none">
+      <div class="section-header row-between">
+        <h2>SIP Schedules <span class="muted small">auto-import via AMFI NAV</span></h2>
+        <div class="actions">
+          <button id="btn-sip-sync-all" title="Sync all active SIPs up to today">Sync All SIPs</button>
+          <button id="btn-sip-add">+ Add SIP</button>
+          <button class="collapse-btn" data-target="sip">▼</button>
+        </div>
+      </div>
+      <div class="section-body collapsed" id="body-sip">
+        <div id="sip-sync-result" class="muted small" style="margin-bottom:8px"></div>
+        <div class="table-wrap">
+          <table id="sip-table">
+            <thead>
+              <tr>
+                <th>Fund / ISIN</th>
+                <th class="num">Amount</th>
+                <th>SIP Day</th>
+                <th>Start Date</th>
+                <th>Status</th>
+                <th>Last Synced</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <!-- Preview panel — shown after clicking Preview -->
+        <div id="sip-preview-panel" style="display:none;margin-top:14px">
+          <div class="row-between" style="margin-bottom:8px">
+            <strong id="sip-preview-title" style="font-size:13px"></strong>
+            <div class="actions">
+              <button id="btn-sip-cancel-preview">Cancel</button>
+              <button id="btn-sip-confirm" class="primary">Confirm &amp; Import</button>
+            </div>
+          </div>
+          <div id="sip-preview-summary" class="muted small" style="margin-bottom:8px"></div>
+          <div class="table-wrap" style="max-height:320px;overflow-y:auto">
+            <table id="sip-preview-table">
+              <thead>
+                <tr>
+                  <th>SIP Date</th><th>Allotment Date</th>
+                  <th class="num">NAV (₹)</th><th class="num">Units</th>
+                  <th class="num">Amount (₹)</th><th>Status</th><th>Note</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Holdings (collapsible, open by default) -->
     <section class="card collapsible" data-section="holdings">
       <div class="section-header row-between">
@@ -539,6 +594,42 @@
       </div>
     </section>
   </main>
+
+  <!-- SIP Schedule modal -->
+  <dialog id="sip-dialog">
+    <form id="sip-form" method="dialog">
+      <h3>Add SIP Schedule</h3>
+      <div class="muted small" style="margin-bottom:10px">
+        Transactions will be created using official AMFI NAV. Review via Preview before importing.
+      </div>
+      <label>Fund ISIN <span class="muted small">(e.g. INF879O01019 for PPFAS Regular)</span>
+        <input type="text" name="isin" required placeholder="INF..." style="text-transform:uppercase" />
+      </label>
+      <label>Scheme Name <span class="muted small">optional display name</span>
+        <input type="text" name="scheme_name" placeholder="Parag Parikh Flexi Cap Regular" />
+      </label>
+      <label>Folio Number <span class="muted small">optional</span>
+        <input type="text" name="folio" placeholder="12345678" />
+      </label>
+      <div class="grid2">
+        <label>Monthly Amount (₹)<input type="number" name="amount" step="any" min="1" required /></label>
+        <label>SIP Day of Month
+          <input type="number" name="sip_day" min="1" max="28" required placeholder="10" />
+        </label>
+      </div>
+      <label>Start Date <span class="muted small">leave blank = today (future SIPs only)</span>
+        <input type="date" name="start_date" />
+      </label>
+      <label>End Date <span class="muted small">leave blank = ongoing</span>
+        <input type="date" name="end_date" />
+      </label>
+      <label>Notes<input type="text" name="notes" /></label>
+      <div class="actions right">
+        <button type="button" id="sip-cancel">Cancel</button>
+        <button type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
 
   <!-- Add/Edit transaction modal -->
   <dialog id="txn-dialog">
