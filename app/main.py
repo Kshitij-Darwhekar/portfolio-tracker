@@ -39,7 +39,7 @@ from .global_equity_analytics import (
 )
 from .global_equity_importer import import_indmoney_global
 from .epf_importer import import_epf_passbook
-from .networth import compute_networth
+from .networth import compute_networth, invalidate_nw_cache
 from .mf_importer import import_cas_pdf
 from .prices import BENCHMARKS, add_symbol_alias, list_symbol_aliases, remove_symbol_alias
 from .xirr import xirr

@@ -161,6 +161,24 @@ document.getElementById("cat-auto-btn")?.addEventListener("click", async () => {
   openCategoryEditor();
 });
 
+const NW_CACHE_KEY = "nw_cache_v1";
+const NW_CACHE_TTL = 5 * 60 * 1000;   // 5 minutes in ms
+
+function _nwCacheGet() {
+  try {
+    const raw = sessionStorage.getItem(NW_CACHE_KEY);
+    if (!raw) return null;
+    const { ts, data } = JSON.parse(raw);
+    if (Date.now() - ts < NW_CACHE_TTL) return data;
+  } catch (_) {}
+  return null;
+}
+
+function _nwCacheSet(data) {
+  try { sessionStorage.setItem(NW_CACHE_KEY, JSON.stringify({ ts: Date.now(), data })); }
+  catch (_) {}
+}
+
 async function loadNetWorth() {
   const banner    = document.getElementById("nw-banner");
   const chartSec  = document.getElementById("nw-chart-section");
@@ -169,8 +187,22 @@ async function loadNetWorth() {
   if (chartSec) chartSec.style.display = isAll ? "" : "none";
   if (!isAll) return;
 
+  // Stale-while-revalidate: show cached data immediately, fetch fresh in background
+  const stale = _nwCacheGet();
+  if (stale) {
+    _renderNetWorth(stale);   // instant — no network
+  }
+
   try {
     const nw = await api("/api/networth");
+    _nwCacheSet(nw);
+    _renderNetWorth(nw);
+  } catch (e) {
+    console.error("Net worth load error:", e);
+  }
+}
+
+function _renderNetWorth(nw) {
     const c = nw.current;
 
     // Headline total
@@ -279,10 +311,6 @@ async function loadNetWorth() {
         },
       },
     });
-
-  } catch (e) {
-    console.error("Net worth load error:", e);
-  }
 }
 
 // ---- EPF section ----

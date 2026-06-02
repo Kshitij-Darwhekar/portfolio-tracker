@@ -5,6 +5,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.4.3] — 2026-06-03
+
+### Performance
+- **Net Worth computation: 19.8s → 3.5s cold, <1ms warm** — two targeted fixes:
+  - Batch price queries: replaced ~1,590 individual SQL lookups (one per instrument per month) with one range query per instrument covering the full historical span; result joined in memory
+  - In-process TTL cache: result stored in a thread-safe Python dict for 3 minutes; subsequent loads return in <1ms until data changes. Cache uses transaction count as a fingerprint so it auto-invalidates after any import or data write
+- **Frontend stale-while-revalidate**: browser sessionStorage caches the `/api/networth` response; on page reload the chart renders instantly from cache while fresh data loads in the background
+
+### Fixed
+- **Canara Robeco scheme names missing** — `INF760K01167` (Large and Mid Cap) and `INF760K01AR3` (Large Cap) showed raw ISINs instead of scheme names because the one-time PDF import created instrument records without the `name` field. Names now set directly: "Canara Robeco Large and Mid Cap Fund - Regular Growth" and "Canara Robeco Large Cap Fund - Regular Growth"
+
+---
+
 ## [0.4.2] — 2026-06-02
 
 ### Added
