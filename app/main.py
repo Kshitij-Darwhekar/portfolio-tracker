@@ -20,6 +20,7 @@ from .analytics import (
     compute_period_xirr,
     compute_realized_pnl_by_period,
     compute_summary,
+    compute_xirr_split,
     find_orphan_sells,
     portfolio_cashflows,
 )
@@ -451,7 +452,12 @@ def xirr_analysis(
         y = int(period[3:])
         from_date, to_date = date(y, 4, 1), date(y + 1, 3, 31)
     # period == "all" or None → from_date stays None
-    return compute_period_xirr(db, from_date, to_date, segment=segment or None)
+    result = compute_period_xirr(db, from_date, to_date, segment=segment or None)
+    # Active vs closed split is meaningful only on the all-time view; subperiod XIRRs
+    # use opening/closing portfolio values so the split wouldn't map cleanly onto them.
+    if from_date is None:
+        result.update(compute_xirr_split(db, segment=segment or None))
+    return result
 
 
 @app.get("/api/realized-pnl")

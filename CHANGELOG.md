@@ -5,6 +5,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.4.4] — 2026-06-04
+
+### Added
+- **Active vs Closed XIRR split** — the Portfolio XIRR card in the XIRR Analysis section now shows a secondary footnote on the all-time view: `Active: X% · Exited: Y%`
+  - **Active XIRR**: cashflows for all instruments where quantity > 0, with today's market value as the terminal. Answers "how is my current portfolio performing?"
+  - **Exited XIRR**: cashflows for fully closed positions (qty = 0, at least one sell), no terminal value. Answers "when I exited, how well did I do historically?"
+  - Only shown on the all-time view — subperiod views (1Y, 3Y, FY) use opening/closing portfolio values so the split wouldn't map cleanly onto them
+  - Implemented in `compute_xirr_split()` in `analytics.py`; endpoint `/api/xirr-analysis` returns `active_xirr` + `closed_xirr` when `from_date` is None
+
+### Fixed
+- **MF Holdings P&L display** — active positions (qty > 0) now show **unrealised P&L only** instead of unrealised + realised combined. Previously, Canara Robeco Large Cap showed +₹13,725 P&L beside "Invested ₹1,000 / Current ₹909" — caused by a past Lateral Shift Out gain being added to the unrealised number. Closed positions (qty = 0) continue to show realised P&L. For positions with a non-trivial realised amount (e.g. partially switched funds), a small `₹X realised` note appears beneath the main P&L figure
+
+---
+
 ## [0.4.3] — 2026-06-03
 
 ### Performance

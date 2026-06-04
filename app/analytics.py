@@ -855,6 +855,73 @@ def compute_summary(db: Session, today: date | None = None, segment: str | None 
 
 # ---------- equity curve ----------
 
+def compute_xirr_split(db: Session, segment: str | None = None) -> dict:
+    """Split portfolio XIRR into active (currently held) vs closed (fully exited) positions.
+
+    Active XIRR  — cashflows for instruments where qty > 0, plus today's market value as
+                   terminal cashflow. Answers: "how is my current portfolio doing?"
+    Closed XIRR  — cashflows for fully exited instruments only (no terminal value, position
+                   is closed). Answers: "when I sold, how well did I do historically?"
+
+    Both are computed on all-time cashflows, shown only on the all-time XIRR view.
+    Note: closed XIRR has survivorship bias — it excludes instruments still held,
+    which may include long-term positions yet to realise gains.
+    """
+    today = date.today()
+    q = select(Transaction).order_by(Transaction.trade_date, Transaction.id)
+    if segment:
+        q = q.where(Transaction.segment == segment)
+    all_txns = db.execute(q).scalars().all()
+    if not all_txns:
+        return {"active_xirr": None, "closed_xirr": None}
+
+    bucket = _txns_by_isin(all_txns)
+    active_flows: list[tuple[date, float]] = []
+    closed_flows: list[tuple[date, float]] = []
+
+    for _key, group in bucket.items():
+        first = group[0]
+        sym = first.symbol.upper()
+        split_actions = get_split_actions(db, sym)
+        qty, avg, _realized, frac_cash = adjusted_holding_state(group, split_actions)
+
+        flows: list[tuple[date, float]] = []
+        for t in group:
+            gross = t.quantity * t.price
+            flows.append(
+                (t.trade_date, -(gross + t.fees) if t.trade_type == "buy" else gross - t.fees)
+            )
+        div_flows = dividend_cashflows(db, sym, group, split_actions)
+        flows.extend(div_flows)
+
+        if qty > 0:
+            best_isin = next((t.isin for t in group if t.isin), None)
+            inst = get_or_create_instrument(
+                db, symbol=first.symbol, isin=best_isin,
+                segment=first.segment, exchange=first.exchange,
+            )
+            cur_price = None
+            if inst:
+                try:
+                    cur_price = latest_close(db, inst, today, cache_only=True)
+                except Exception:
+                    pass
+            if cur_price is None:
+                continue  # skip: no price means terminal value unknown — don't distort active XIRR
+            terminal = qty * cur_price + (frac_cash or 0)
+            flows.append((today, terminal))
+            active_flows.extend(flows)
+        else:
+            # Only include if there were actual sell transactions (not just buys that hit 0)
+            if any(t.trade_type == "sell" for t in group):
+                closed_flows.extend(flows)
+
+    return {
+        "active_xirr": xirr(active_flows) if active_flows else None,
+        "closed_xirr": xirr(closed_flows) if closed_flows else None,
+    }
+
+
 def compute_equity_curve(
     db: Session,
     benchmarks: list[str] | None = None,

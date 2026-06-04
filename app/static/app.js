@@ -1462,11 +1462,26 @@ async function loadXirrAnalysis(period = "all", fromDate = null, toDate = null) 
 
     let html = "";
 
-    // Equity + MF portfolio XIRR with market benchmarks
-    html += box("Portfolio XIRR",
-      r.portfolio_xirr,
-      r.from_date ? `${r.from_date} → ${r.to_date}` : "equities + mutual funds",
-      cls(r.portfolio_xirr), "portfolio-box");
+    // Equity + MF portfolio XIRR — headline box with active/closed split footnote
+    {
+      const subText = r.from_date ? `${r.from_date} → ${r.to_date}` : "equities + mutual funds";
+      // Active vs closed split: only available on all-time view (no from_date)
+      let splitHtml = "";
+      if (!r.from_date && (r.active_xirr != null || r.closed_xirr != null)) {
+        const activePart  = r.active_xirr  != null
+          ? `Active: <span class="split-val ${cls(r.active_xirr)}">${fmtPct(r.active_xirr)}</span>`  : "";
+        const closedPart  = r.closed_xirr  != null
+          ? `Exited: <span class="split-val ${cls(r.closed_xirr)}">${fmtPct(r.closed_xirr)}</span>` : "";
+        const sep = activePart && closedPart ? " &nbsp;·&nbsp; " : "";
+        splitHtml = `<div class="xirr-split">${activePart}${sep}${closedPart}</div>`;
+      }
+      html += `<div class="xirr-box portfolio-box">
+        <div class="label">Portfolio XIRR</div>
+        <div class="xirr-val ${cls(r.portfolio_xirr)}">${fmtPct(r.portfolio_xirr)}</div>
+        <div class="sub">${subText}</div>
+        ${splitHtml}
+      </div>`;
+    }
 
     for (const [ticker, b] of Object.entries(r.benchmarks || {})) {
       const diff = r.portfolio_xirr != null && b.xirr != null ? r.portfolio_xirr - b.xirr : null;
@@ -1729,7 +1744,13 @@ function renderHoldings() {
     if (hideClosed && (r.quantity || 0) <= 0) continue;
     if (!hideClosed && (r.quantity || 0) <= 0 && (r.realized_pnl || 0) === 0) continue;
     if (holdingsFilterText && !r.symbol.toUpperCase().includes(holdingsFilterText)) continue;
-    const pnl = (r.unrealized_pnl ?? 0) + (r.realized_pnl ?? 0);
+    // For active positions show UNREALIZED P&L only.
+    // Realized gains (e.g. from a fund switch) live in the Realized P&L section.
+    // Combining them here shows "+₹13k P&L" beside "Invested ₹1k / Current ₹909" — confusing.
+    // For closed positions (qty=0) show realized P&L — that's all that remains.
+    const isActive = (r.quantity || 0) > 0;
+    const pnl = isActive ? (r.unrealized_pnl ?? 0) : (r.realized_pnl ?? 0);
+    const hasRealized = isActive && Math.abs(r.realized_pnl || 0) > 1;
     const nameCell = activeSegment === "MF"
       ? `<td><div style="font-size:12px;max-width:220px;white-space:normal;line-height:1.4">${r.display_name || r.symbol}</div></td>`
       : `<td>${r.display_name || r.symbol}</td>`;
@@ -1746,7 +1767,7 @@ function renderHoldings() {
         <td class="num">${fmtINR(r.current_price)}</td>
         <td class="num">${fmtINR(r.invested)}</td>
         <td class="num">${fmtINR(r.current_value)}</td>
-        <td class="num ${cls(pnl)}">${fmtINR(pnl)}</td>
+        <td class="num ${cls(pnl)}">${fmtINR(pnl)}${hasRealized ? `<div class="muted" style="font-size:10px" title="Realized gain from past switch/sale">${fmtINR(r.realized_pnl)} realized</div>` : ''}</td>
         <td class="num ${cls(r.pct_return)}">${fmtPct(r.pct_return)}</td>
         <td class="num ${cls(r.xirr)}">${fmtPct(r.xirr)}</td>
       </tr>`;

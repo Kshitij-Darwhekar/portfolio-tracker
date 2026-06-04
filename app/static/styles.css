@@ -309,6 +309,8 @@ dialog input, dialog select {
 .xirr-box .label { font-size:11px; text-transform:uppercase; color:var(--muted); margin-bottom:4px; letter-spacing:.4px; }
 .xirr-box .xirr-val { font-size:22px; font-weight:600; }
 .xirr-box .sub { font-size:11px; color:var(--muted); margin-top:3px; }
+.xirr-box .xirr-split { margin-top:8px; padding-top:6px; border-top:1px solid var(--border); font-size:11px; color:var(--muted); letter-spacing:.2px; }
+.xirr-box .xirr-split .split-val { font-weight:600; }
 .realized-box { background:rgba(255,255,255,.03); border:1px solid var(--border); border-radius:6px; padding:12px 14px; }
 .realized-box .label { font-size:11px; text-transform:uppercase; color:var(--muted); margin-bottom:4px; }
 .realized-box .amount { font-size:20px; font-weight:600; }

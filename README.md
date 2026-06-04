@@ -204,6 +204,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 | Version | Date | Highlights |
 |---|---|---|
+| **0.4.4** | 2026-06-04 | Active vs Closed XIRR split in Portfolio XIRR card; MF Holdings P&L fix (unrealised only for active positions) |
 | **0.4.3** | 2026-06-03 | Net Worth load time 19.8s→3.5s (batch queries + TTL cache + frontend stale-while-revalidate) |
 | **0.4.2** | 2026-06-02 | NW actual milestone dots, projection rate fix (12% all-time XIRR), 5-year horizon |
 | **0.4.1** | 2026-06-02 | SIP scheduler (AMFI NAV, stamp duty, preview mode), Canara Robeco PDF import, switch cost basis |
