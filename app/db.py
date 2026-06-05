@@ -69,6 +69,11 @@ class Instrument(Base):
     # Asset class category for Net Worth breakdown
     # equity | debt | gold | hybrid | cash | silver | other
     asset_category = Column(String, nullable=True)
+    # Market cap classification (from yfinance info + SEBI thresholds)
+    # large | mid | small  (None = not yet fetched)
+    market_cap_category = Column(String, nullable=True)
+    # Sector from yfinance info (e.g. "Technology", "Financial Services")
+    sector = Column(String, nullable=True)
 
 
 class PriceCache(Base):
@@ -307,6 +312,14 @@ def init_db() -> None:
         with engine.connect() as conn:
             conn.execute(text("ALTER TABLE transactions ADD COLUMN folio TEXT"))
             conn.commit()
+
+    if "instruments" in insp.get_table_names():
+        inst_cols = {c["name"] for c in insp.get_columns("instruments")}
+        for col_name in ("market_cap_category", "sector"):
+            if col_name not in inst_cols:
+                with engine.connect() as conn:
+                    conn.execute(text(f"ALTER TABLE instruments ADD COLUMN {col_name} TEXT"))
+                    conn.commit()
 
 
 def get_session():

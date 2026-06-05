@@ -185,6 +185,102 @@ def fetch_equity_history(yf_ticker: str, start: date, end: date) -> dict[date, f
     return out
 
 
+# SEBI approximate market cap thresholds (INR, 2024-25).
+# NSE defines large cap as the top 100 companies by full market cap (~>₹40,000 Cr),
+# mid cap as 101-250 (~₹8,000-40,000 Cr), small cap as 251+ (~<₹8,000 Cr).
+# These are approximate; NSE refreshes the official list every six months.
+_LARGE_CAP_MIN_INR = 400_000_000_000   # ₹40,000 Cr
+_MID_CAP_MIN_INR   =  80_000_000_000   # ₹8,000 Cr
+
+# Static overrides for instruments yfinance cannot classify: ETFs, REITs, InvITs, SGBs.
+# Keys are NSE symbols (upper-case). Used by both fetch_instrument_meta (persists to DB)
+# and compute_allocation_breakdown (runtime fallback so X-Ray works before Refresh).
+INSTRUMENT_META_OVERRIDES: dict[str, dict] = {
+    # Gold ETFs / ETF Add-ons
+    "GOLDBEES":    {"sector": "Gold",              "market_cap_category": None},
+    "GOLDETFADD":  {"sector": "Gold",              "market_cap_category": None},
+    "GOLDADD":     {"sector": "Gold",              "market_cap_category": None},
+    "GOLDIETF":    {"sector": "Gold",              "market_cap_category": None},
+    "AXISGOLD":    {"sector": "Gold",              "market_cap_category": None},
+    "HDFCMFGETF":  {"sector": "Gold",              "market_cap_category": None},
+    # Silver ETFs
+    "SILVERBEES":  {"sector": "Silver",            "market_cap_category": None},
+    "SILVRETF":    {"sector": "Silver",            "market_cap_category": None},
+    # Liquid / Debt ETFs
+    "LIQUIDCASE":  {"sector": "Liquid / Debt",     "market_cap_category": None},
+    "LIQUIDBEES":  {"sector": "Liquid / Debt",     "market_cap_category": None},
+    "LIQUIDIETF":  {"sector": "Liquid / Debt",     "market_cap_category": None},
+    "ICICIB22":    {"sector": "Liquid / Debt",     "market_cap_category": None},
+    "LICNETFGSEC": {"sector": "Liquid / Debt",     "market_cap_category": None},
+    # Broad index ETFs
+    "NIFTYBEES":   {"sector": "Index ETF",         "market_cap_category": None},
+    "JUNIORBEES":  {"sector": "Index ETF",         "market_cap_category": None},
+    "SETFNIF50":   {"sector": "Index ETF",         "market_cap_category": None},
+    "ICICINIFTY":  {"sector": "Index ETF",         "market_cap_category": None},
+    "MOM100":      {"sector": "Index ETF",         "market_cap_category": None},
+    # Sector ETFs
+    "BANKBEES":    {"sector": "Financial Services", "market_cap_category": None},
+    "ITBEES":      {"sector": "Technology",         "market_cap_category": None},
+    # REITs
+    "EMBASSY":     {"sector": "Real Estate / REITs", "market_cap_category": "large"},
+    "MINDSPACE":   {"sector": "Real Estate / REITs", "market_cap_category": "mid"},
+    "BROOKFIELD":  {"sector": "Real Estate / REITs", "market_cap_category": "mid"},
+    "NXTRA":       {"sector": "Real Estate / REITs", "market_cap_category": "mid"},
+    # InvITs
+    "POWERGRID":   {},  # regular stock — let yfinance handle
+    "NEXUSINVIT":  {"sector": "Infrastructure InvIT", "market_cap_category": "mid"},
+    "INDIGRID":    {"sector": "Infrastructure InvIT", "market_cap_category": "mid"},
+    # SGBs
+    "SGBDE31III":  {"sector": "Gold / SGB",        "market_cap_category": None},
+    "SGBDEC31III": {"sector": "Gold / SGB",        "market_cap_category": None},
+}
+
+
+def fetch_instrument_meta(db: Session, inst: "Instrument") -> dict:
+    """Fetch sector and market_cap_category for an EQ instrument.
+
+    Checks the static override map first (ETFs, REITs, SGBs that yfinance cannot
+    classify). Falls back to yfinance .info for regular equities.
+    Writes the result to the instrument row and commits.
+    """
+    import yfinance as yf
+
+    sym = inst.symbol.upper()
+
+    # Static overrides take priority — yfinance returns None for ETFs/REITs/SGBs
+    override = INSTRUMENT_META_OVERRIDES.get(sym, {})
+    if override:  # non-empty dict means we have a definitive answer
+        cap_cat = override.get("market_cap_category")
+        sector  = override.get("sector")
+        inst.market_cap_category = cap_cat
+        inst.sector = sector
+        db.commit()
+        return {"sector": sector, "market_cap_category": cap_cat}
+
+    ticker_str = inst.yf_ticker or resolve_yf_ticker(sym, "NSE")
+    try:
+        info = yf.Ticker(ticker_str).info
+        market_cap = info.get("marketCap") or 0
+        sector     = info.get("sector") or None
+
+        if market_cap >= _LARGE_CAP_MIN_INR:
+            cap_cat = "large"
+        elif market_cap >= _MID_CAP_MIN_INR:
+            cap_cat = "mid"
+        elif market_cap > 0:
+            cap_cat = "small"
+        else:
+            cap_cat = None
+
+        inst.market_cap_category = cap_cat
+        inst.sector = sector
+        db.commit()
+        return {"sector": sector, "market_cap_category": cap_cat}
+    except Exception as exc:
+        log.warning("fetch_instrument_meta failed for %s: %s", ticker_str, exc)
+        return {"sector": None, "market_cap_category": None}
+
+
 def resolve_yf_ticker(symbol: str, exchange: str | None) -> str:
     """Map (symbol, exchange) → yfinance ticker."""
     sym = symbol.strip().upper()

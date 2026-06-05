@@ -1317,16 +1317,37 @@ document.querySelectorAll(".seg-btn").forEach((btn) => {
     btn.classList.add("active");
     activeSegment = btn.dataset.seg;
 
+    const isFI     = activeSegment === "FI";
+    const isEPF    = activeSegment === "EPF";
+    const isGlobal = activeSegment === "GLOBAL";
+    const isBonds  = activeSegment === "BONDS";
+    const isXray   = activeSegment === "XRAY";
+
+    // X-Ray tab: show only the allocation section, hide everything else
+    const allocSection = document.querySelector('[data-section="allocation"]');
+    if (allocSection) allocSection.style.display = isXray ? "" : "none";
+
+    if (isXray) {
+      // Hide all regular panels
+      ["xirr","realized","chart","holdings","ca","aliases","txns","nw-chart"].forEach(sec => {
+        const el = document.querySelector(`[data-section="${sec}"]`);
+        if (el) el.style.display = "none";
+      });
+      const summarySection = document.getElementById("summary-cards");
+      if (summarySection) summarySection.style.display = "none";
+      ["global-section","bonds-section","fi-section","fi-charts-section","epf-section"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = "none";
+      });
+      loadAllocation();
+      return;
+    }
+
     // Show/hide folio column in holdings table based on segment
     const folioTh = document.getElementById("th-folio");
     const symTh   = document.getElementById("th-symbol");
     if (folioTh) folioTh.style.display = activeSegment === "MF" ? "" : "none";
     if (symTh)   symTh.textContent     = activeSegment === "MF" ? "Scheme" : "Symbol";
-
-    const isFI     = activeSegment === "FI";
-    const isEPF    = activeSegment === "EPF";
-    const isGlobal = activeSegment === "GLOBAL";
-    const isBonds  = activeSegment === "BONDS";
 
     // Section visibility for special tabs
     const globalSec = document.getElementById("global-section");
@@ -1343,7 +1364,7 @@ document.querySelectorAll(".seg-btn").forEach((btn) => {
     });
 
     // FI-specific panels — only visible on FI tab
-    const fiSection     = document.getElementById("fi-section");
+    const fiSection      = document.getElementById("fi-section");
     const fiChartSection = document.getElementById("fi-charts-section");
     if (fiSection)      fiSection.style.display      = isFI ? "" : "none";
     if (fiChartSection) fiChartSection.style.display = isFI ? "" : "none";
@@ -1352,7 +1373,7 @@ document.querySelectorAll(".seg-btn").forEach((btn) => {
     const epfSec = document.getElementById("epf-section");
     if (epfSec) epfSec.style.display = isEPF ? "" : "none";
 
-    // Generic summary cards hidden on FI and EPF tabs
+    // Generic summary cards hidden on FI, EPF, Global, and Bonds tabs
     const summarySection = document.getElementById("summary-cards");
     if (summarySection) summarySection.style.display = hideOnSpecial ? "none" : "";
 
@@ -1526,6 +1547,377 @@ async function loadXirrAnalysis(period = "all", fromDate = null, toDate = null) 
 
 document.getElementById("xirr-period-select").addEventListener("change", (e) => {
   loadXirrAnalysis(e.target.value);
+});
+
+// --- Portfolio X-Ray ---
+
+const _CAP_COLOR    = { large:"#38bdf8", mid:"#818cf8", small:"#34d399", unclassified:"#64748b" };
+const _SECT_PALETTE = ["#38bdf8","#818cf8","#fb923c","#f472b6","#a78bfa","#34d399","#4ade80","#facc15","#f87171","#2dd4bf","#c084fc","#6ee7b7"];
+const _allocCharts  = {};
+
+function _destroyAllocCharts() {
+  for (const k of Object.keys(_allocCharts)) {
+    try { _allocCharts[k]?.destroy(); } catch (_) {}
+    delete _allocCharts[k];
+  }
+}
+
+// Small donut used only for sector overview
+function _makeDonut(canvasId, items, colors, labelFn, onClickFn) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || !items.length) return;
+  const chart = new Chart(canvas, {
+    type: "doughnut",
+    data: {
+      labels: items.map(labelFn),
+      datasets: [{ data: items.map(i => i.value), backgroundColor: colors,
+        borderWidth: 2, borderColor: "#0d1b2e", hoverOffset: 6 }]
+    },
+    options: {
+      cutout: "65%",
+      animation: { duration: 500 },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: "#1e293b", borderColor: "#334155", borderWidth: 1,
+          callbacks: { label: ctx => `  ${labelFn(items[ctx.dataIndex])}: ${items[ctx.dataIndex].pct}%` }
+        }
+      },
+      onClick: (_, els) => { if (els.length) onClickFn(els[0].index); }
+    }
+  });
+  _allocCharts[canvasId] = chart;
+}
+
+// Holdings table rows (shared between cap drill and sector/mf details)
+function _holdingRows(holdings) {
+  return holdings.map(h => {
+    // MF holdings have ISINs as symbols (INF... / IN0...).
+    // Show the full scheme name as the primary bold cell; ISIN as secondary muted.
+    // For equities, keep symbol as primary and display_name as secondary.
+    const isMF = /^IN[F0]/i.test(h.symbol);
+    const hasSchemeName = h.display_name && h.display_name !== h.symbol;
+    const primary   = (isMF && hasSchemeName) ? escapeHtml(h.display_name) : h.symbol;
+    const secondary = (isMF && hasSchemeName) ? `<span style="font-size:10px;color:var(--muted)">${h.symbol}</span>`
+                    : (hasSchemeName ? escapeHtml(h.display_name) : "—");
+    return `
+    <tr>
+      <td class="sym" style="${isMF ? "font-weight:500;font-size:12px;white-space:normal;max-width:220px;line-height:1.4" : ""}">${primary}</td>
+      <td class="xray-nm">${secondary}</td>
+      <td class="num">${fmtINR(h.value)}</td>
+      <td class="num">${h.pct}%</td>
+      <td class="num ${cls(h.pct_return)}">${fmtPct(h.pct_return)}</td>
+      <td class="num ${cls(h.xirr)}">${fmtPct(h.xirr)}</td>
+    </tr>`;
+  }).join("");
+}
+
+function _holdingsTable(holdings) {
+  const isMFBatch = holdings.length > 0 && /^IN[F0]/i.test(holdings[0]?.symbol || "");
+  return `<div style="overflow-x:auto">
+    <table class="xray-holdings-tbl">
+      <thead><tr><th>${isMFBatch ? "Scheme" : "Symbol"}</th><th>${isMFBatch ? "ISIN" : "Name"}</th><th class="num">Value</th><th class="num">Weight</th><th class="num">Return</th><th class="num">XIRR</th></tr></thead>
+      <tbody>${_holdingRows(holdings)}</tbody>
+    </table></div>`;
+}
+
+// Market cap: show holdings for the active pill category
+function _showCapDrill(items, colors, idx) {
+  const drill = document.getElementById("xray-cap-drill");
+  if (!drill || !items[idx]) return;
+  const item = items[idx], color = colors[idx];
+  drill.innerHTML = `
+    <div class="xray-drill-header">
+      <span class="xray-drill-dot" style="background:${color}"></span>
+      <span>${item.label}</span>
+      <span class="muted small">${fmtINR(item.value)} · ${item.holdings.length} stock${item.holdings.length !== 1 ? "s" : ""}</span>
+    </div>
+    ${_holdingsTable(item.holdings)}`;
+}
+
+// Sector / MF: toggle inline detail panel under the clicked row
+function _toggleRowDetail(items, colors, detailPrefix, rowAttr, idx, labelFn) {
+  const detailEl = document.getElementById(`${detailPrefix}-${idx}`);
+  if (!detailEl) return;
+  const isOpen = detailEl.style.display !== "none";
+
+  // collapse all
+  document.querySelectorAll(`[id^="${detailPrefix}-"]`).forEach(el => { el.style.display = "none"; });
+  document.querySelectorAll(`.xray-sector-row[${rowAttr}]`).forEach(r => r.classList.remove("active"));
+
+  if (!isOpen) {
+    detailEl.style.display = "block";
+    document.querySelector(`.xray-sector-row[${rowAttr}="${idx}"]`)?.classList.add("active");
+    const item = items[idx], color = colors[idx], label = labelFn(item);
+    detailEl.innerHTML = `
+      <div class="xray-detail-header">
+        <span class="xray-detail-dot" style="background:${color}"></span>
+        <span class="xray-detail-title">${label}</span>
+        <span class="xray-detail-meta">${fmtINR(item.value)} · ${item.pct}%</span>
+      </div>
+      ${_holdingsTable(item.holdings)}`;
+  }
+}
+
+// One-line smart insight from the allocation data
+function _xrayInsight(eq, mf) {
+  if (eq.unclassified_count > 0) {
+    const total = eq.by_market_cap.reduce((s, r) => s + r.holdings.length, 0) || 1;
+    if (eq.unclassified_count / total >= 0.3)
+      return `${eq.unclassified_count} stocks have no market cap data. Click <em>Refresh market data</em> to classify them.`;
+  }
+  const top = eq.by_sector[0];
+  if (top && top.pct > 35)
+    return `Portfolio is concentrated in <strong>${top.sector}</strong> at ${top.pct}% — higher sector-specific risk.`;
+  const small = eq.by_market_cap.find(r => r.category === "small");
+  if (small && small.pct > 35)
+    return `High small cap allocation at <strong>${small.pct}%</strong> — expect higher volatility.`;
+  const large = eq.by_market_cap.find(r => r.category === "large");
+  if (large && large.pct > 0 && eq.by_sector.length >= 3)
+    return `Diversified across ${eq.by_sector.length} sectors with <strong>${large.pct}%</strong> large cap stability.`;
+  return null;
+}
+
+async function loadAllocation() {
+  const content = document.getElementById("allocation-content");
+  if (!content) return;
+  _destroyAllocCharts();
+  content.innerHTML = `<div class="muted small">Loading…</div>`;
+
+  try {
+    const data = await api("/api/allocation");
+    const eq = data.equity, mf = data.mf;
+
+    if (!eq.total_value && !mf.total_value) {
+      content.innerHTML = `<div class="muted small">No holdings found. Import transactions first.</div>`;
+      return;
+    }
+
+    const capColors  = eq.by_market_cap.map(r => _CAP_COLOR[r.category] || "#64748b");
+    const sectColors = eq.by_sector.map((_, i) => _SECT_PALETTE[i % _SECT_PALETTE.length]);
+    const mfColors   = mf.by_category.map((_, i) => _SECT_PALETTE[i % _SECT_PALETTE.length]);
+
+    const insight = _xrayInsight(eq, mf);
+    let html = insight ? `<div class="xray-insight">💡 &nbsp;${insight}</div>` : "";
+
+    // ── Market Cap block ─────────────────────────────────────────────────
+    if (eq.total_value > 0 && eq.by_market_cap.length > 0) {
+      const propSegs = eq.by_market_cap.map((r, i) =>
+        `<div class="xray-prop-seg" style="width:${r.pct}%;background:${capColors[i]}" title="${r.label}: ${r.pct}%"></div>`
+      ).join("");
+
+      const pills = eq.by_market_cap.map((r, i) =>
+        `<button class="xray-pill${i === 0 ? " active" : ""}" data-cap-idx="${i}"
+          style="${i === 0 ? `background:${capColors[i]}26;border-color:${capColors[i]}` : ""}">
+          <span class="xray-pill-dot" style="background:${capColors[i]}"></span>
+          <span class="xray-pill-label">${r.label}</span>
+          <span class="xray-pill-pct">${r.pct}%</span>
+        </button>`
+      ).join("");
+
+      html += `
+        <div class="xray-block">
+          <div class="xray-block-header">
+            <span class="xray-block-title">Market Cap Allocation</span>
+            <span class="xray-block-meta">${eq.by_market_cap.reduce((s,r)=>s+r.holdings.length,0)} stocks
+              ${eq.unclassified_count > 0 ? `· <span class="xray-hint">${eq.unclassified_count} unclassified</span>` : ""}
+            </span>
+          </div>
+          <div class="xray-prop-bar">${propSegs}</div>
+          <div class="xray-pills" id="xray-cap-pills">${pills}</div>
+          <div class="xray-cap-drill" id="xray-cap-drill"></div>
+        </div>`;
+    }
+
+    // ── Sector block ──────────────────────────────────────────────────────
+    if (eq.total_value > 0 && eq.by_sector.length > 0) {
+      const sectorRows = eq.by_sector.map((r, i) => `
+        <div class="xray-sector-row" data-sect-idx="${i}">
+          <span class="xray-sector-dot" style="background:${sectColors[i]}"></span>
+          <span class="xray-sector-name">${r.sector}</span>
+          <span class="xray-sector-pct">${r.pct}%</span>
+          <span class="xray-sector-val">${fmtINR(r.value)}</span>
+          <span class="xray-sector-arrow">›</span>
+        </div>
+        <div class="xray-row-detail" id="xray-sect-detail-${i}" style="display:none"></div>`
+      ).join("");
+
+      html += `
+        <div class="xray-block">
+          <div class="xray-block-header">
+            <span class="xray-block-title">Sector Allocation</span>
+            <span class="xray-block-meta">${eq.by_sector.length} sectors</span>
+          </div>
+          <div class="xray-sector-layout">
+            <div class="xray-sector-donut">
+              <canvas id="alloc-sector-chart" width="110" height="110"></canvas>
+            </div>
+            <div class="xray-sector-rows" id="xray-sector-rows">${sectorRows}</div>
+          </div>
+        </div>`;
+    }
+
+    // ── MF block ──────────────────────────────────────────────────────────
+    if (mf.total_value > 0 && mf.by_category.length > 0) {
+      // Top 4 headline categories shown individually; everything else collapsed into "Others"
+      const TOP_MF = ["Large Cap", "Mid Cap", "Large & Mid Cap", "Flexi Cap", "Small Cap"];
+      const topCats   = mf.by_category.filter(r => TOP_MF.includes(r.category));
+      const otherCats = mf.by_category.filter(r => !TOP_MF.includes(r.category));
+
+      // Top-category rows
+      let mfRows = topCats.map(r => {
+        const i = mf.by_category.indexOf(r);
+        return `
+        <div class="xray-sector-row" data-mf-idx="${i}">
+          <span class="xray-sector-dot" style="background:${mfColors[i]}"></span>
+          <span class="xray-sector-name">${r.category}</span>
+          <span class="xray-sector-pct">${r.pct}%</span>
+          <span class="xray-sector-val">${fmtINR(r.value)}</span>
+          <span class="xray-sector-arrow">›</span>
+        </div>
+        <div class="xray-row-detail" id="xray-mf-detail-${i}" style="display:none"></div>`;
+      }).join("");
+
+      // "Others" row + expandable sub-categories
+      if (otherCats.length > 0) {
+        const othersVal = otherCats.reduce((s, r) => s + r.value, 0);
+        const othersPct = Math.round(otherCats.reduce((s, r) => s + r.pct, 0) * 100) / 100;
+        const subRows = otherCats.map((r, si) => {
+          const i = mf.by_category.indexOf(r);
+          return `
+          <div class="xray-sector-row xray-subcat-row" data-subcat-idx="${si}" data-mf-idx="${i}">
+            <span class="xray-sector-dot" style="background:${mfColors[i]}"></span>
+            <span class="xray-sector-name">${r.category}</span>
+            <span class="xray-sector-pct">${r.pct}%</span>
+            <span class="xray-sector-val">${fmtINR(r.value)}</span>
+            <span class="xray-sector-arrow">›</span>
+          </div>
+          <div class="xray-row-detail" id="xray-subcat-detail-${si}" style="display:none"></div>`;
+        }).join("");
+        mfRows += `
+        <div class="xray-sector-row" data-mf-others="1">
+          <span class="xray-sector-dot" style="background:#64748b"></span>
+          <span class="xray-sector-name">Others <span style="font-size:11px;color:var(--muted);font-weight:400">${otherCats.length} categories</span></span>
+          <span class="xray-sector-pct">${othersPct}%</span>
+          <span class="xray-sector-val">${fmtINR(othersVal)}</span>
+          <span class="xray-sector-arrow">›</span>
+        </div>
+        <div class="xray-row-detail" id="xray-mf-others-detail" style="display:none">
+          <div style="padding:4px 0 4px 14px">${subRows}</div>
+        </div>`;
+      }
+
+      html += `
+        <div class="xray-block">
+          <div class="xray-block-header">
+            <span class="xray-block-title">Mutual Fund Categories</span>
+            <span class="xray-block-meta">${mf.by_category.reduce((s,r)=>s+r.holdings.length,0)} funds
+              <span class="xray-hint">· SEBI category from scheme name</span>
+            </span>
+          </div>
+          <div class="xray-sector-rows" id="xray-mf-rows">${mfRows}</div>
+        </div>`;
+    }
+
+    content.innerHTML = html;
+
+    // ── Wire interactions ────────────────────────────────────────────────
+
+    // Market cap pills → swap drill table
+    if (eq.by_market_cap.length) {
+      _showCapDrill(eq.by_market_cap, capColors, 0); // show Large Cap by default
+      document.getElementById("xray-cap-pills")?.querySelectorAll(".xray-pill").forEach(pill => {
+        pill.addEventListener("click", () => {
+          const idx = +pill.dataset.capIdx;
+          document.querySelectorAll(".xray-pill[data-cap-idx]").forEach((p, i) => {
+            const on = i === idx;
+            p.classList.toggle("active", on);
+            p.style.background = on ? `${capColors[i]}26` : "";
+            p.style.borderColor = on ? capColors[i] : "";
+          });
+          _showCapDrill(eq.by_market_cap, capColors, idx);
+        });
+      });
+    }
+
+    // Sector rows → inline expand
+    if (eq.by_sector.length) {
+      _makeDonut("alloc-sector-chart", eq.by_sector, sectColors, r => r.sector,
+        idx => _toggleRowDetail(eq.by_sector, sectColors, "xray-sect-detail", "data-sect-idx", idx, r => r.sector));
+      document.getElementById("xray-sector-rows")?.querySelectorAll(".xray-sector-row[data-sect-idx]").forEach(row =>
+        row.addEventListener("click", () => _toggleRowDetail(
+          eq.by_sector, sectColors, "xray-sect-detail", "data-sect-idx", +row.dataset.sectIdx, r => r.sector))
+      );
+    }
+
+    // MF rows → three-level expand
+    if (mf.by_category.length) {
+      const mfRowsEl = document.getElementById("xray-mf-rows");
+
+      // Top-category rows (direct expand to holdings)
+      mfRowsEl?.querySelectorAll(".xray-sector-row[data-mf-idx]:not(.xray-subcat-row)").forEach(row =>
+        row.addEventListener("click", () => _toggleRowDetail(
+          mf.by_category, mfColors, "xray-mf-detail", "data-mf-idx", +row.dataset.mfIdx, r => r.category))
+      );
+
+      // "Others" row → expand/collapse sub-category list
+      const othersRow    = mfRowsEl?.querySelector(".xray-sector-row[data-mf-others]");
+      const othersDetail = document.getElementById("xray-mf-others-detail");
+      if (othersRow && othersDetail) {
+        othersRow.addEventListener("click", () => {
+          const open = othersDetail.style.display !== "none";
+          othersDetail.style.display = open ? "none" : "block";
+          othersRow.classList.toggle("active", !open);
+        });
+      }
+
+      // Sub-category rows (inside Others) → expand to individual funds
+      mfRowsEl?.querySelectorAll(".xray-subcat-row[data-subcat-idx]").forEach(row => {
+        row.addEventListener("click", e => {
+          e.stopPropagation(); // don't bubble to "Others" toggle
+          const si     = +row.dataset.subcatIdx;
+          const mfIdx  = +row.dataset.mfIdx;
+          const detail = document.getElementById(`xray-subcat-detail-${si}`);
+          const isOpen = detail?.style.display !== "none";
+
+          // Close other sub-details
+          document.querySelectorAll('[id^="xray-subcat-detail-"]').forEach(el => { el.style.display = "none"; });
+          document.querySelectorAll(".xray-subcat-row").forEach(r => r.classList.remove("active"));
+
+          if (!isOpen && detail) {
+            detail.style.display = "block";
+            row.classList.add("active");
+            const r = mf.by_category[mfIdx];
+            detail.innerHTML = `
+              <div class="xray-detail-header">
+                <span class="xray-detail-dot" style="background:${mfColors[mfIdx]}"></span>
+                <span class="xray-detail-title">${r.category}</span>
+                <span class="xray-detail-meta">${fmtINR(r.value)} · ${r.pct}%</span>
+              </div>
+              ${_holdingsTable(r.holdings)}`;
+          }
+        });
+      });
+    }
+
+  } catch (e) {
+    content.innerHTML = `<div class="neg small">Failed: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+document.getElementById("refresh-market-meta-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("refresh-market-meta-btn");
+  btn.disabled = true;
+  btn.textContent = "Fetching…";
+  try {
+    const r = await api("/api/refresh-market-meta", { method: "POST" });
+    btn.textContent = `Done (${r.updated}/${r.total})`;
+    await loadAllocation();
+    setTimeout(() => { btn.textContent = "Refresh market data"; btn.disabled = false; }, 3000);
+  } catch (e) {
+    btn.textContent = "Failed — retry";
+    btn.disabled = false;
+  }
 });
 
 document.getElementById("xirr-apply").addEventListener("click", async () => {

@@ -316,6 +316,71 @@ dialog input, dialog select {
 .realized-box .amount { font-size:20px; font-weight:600; }
 .realized-box .sub { font-size:12px; color:var(--muted); margin-top:3px; }
 
+/* ---- Portfolio X-Ray ---- */
+.btn-secondary { background:transparent; border:1px solid var(--border); color:var(--muted); border-radius:4px; padding:4px 10px; font-size:12px; cursor:pointer; }
+.btn-secondary:hover { border-color:var(--accent); color:var(--accent); }
+
+/* Smart insight */
+.xray-insight { display:flex; align-items:flex-start; gap:8px; background:rgba(56,189,248,.07); border:1px solid rgba(56,189,248,.18); border-radius:8px; padding:11px 14px; font-size:12px; color:var(--muted); margin-bottom:16px; line-height:1.5; }
+.xray-insight strong { color:var(--fg); }
+.xray-hint { font-size:11px; color:var(--muted); font-style:italic; }
+
+/* Block cards */
+.xray-block { background:rgba(255,255,255,.025); border:1px solid var(--border); border-radius:10px; padding:18px 20px; margin-bottom:14px; }
+.xray-block-header { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:16px; gap:8px; flex-wrap:wrap; }
+.xray-block-title { font-size:13px; font-weight:600; letter-spacing:.1px; }
+.xray-block-meta { font-size:11px; color:var(--muted); text-align:right; }
+
+/* Proportion bar (market cap) */
+.xray-prop-bar { display:flex; gap:3px; height:10px; border-radius:5px; overflow:hidden; margin-bottom:16px; }
+.xray-prop-seg { height:100%; border-radius:3px; transition:width .5s ease; cursor:default; }
+
+/* Pill tabs */
+.xray-pills { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+.xray-pill { display:inline-flex; align-items:center; gap:6px; padding:7px 14px; border-radius:20px; border:1px solid var(--border); background:transparent; color:var(--muted); font-size:12px; cursor:pointer; transition:all .15s; }
+.xray-pill:hover { border-color:rgba(255,255,255,.3); color:var(--fg); }
+.xray-pill.active { color:var(--fg); }
+.xray-pill-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+.xray-pill-label { font-weight:500; }
+.xray-pill-pct { font-weight:700; }
+
+/* Cap drill table */
+.xray-cap-drill { border-top:1px solid var(--border); padding-top:12px; }
+.xray-drill-header { display:flex; align-items:center; gap:8px; margin-bottom:10px; font-size:13px; font-weight:600; }
+.xray-drill-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+
+/* Sector layout: small donut left + rows right */
+.xray-sector-layout { display:flex; gap:20px; align-items:flex-start; }
+.xray-sector-donut { flex:0 0 110px; padding-top:4px; }
+.xray-sector-rows { flex:1; min-width:0; }
+
+/* Sector / MF rows */
+.xray-sector-row { display:flex; align-items:center; gap:10px; padding:9px 8px; border-radius:7px; cursor:pointer; transition:background .15s; }
+.xray-sector-row:hover { background:rgba(255,255,255,.05); }
+.xray-sector-row.active { background:rgba(255,255,255,.07); }
+.xray-sector-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+.xray-sector-name { flex:1; font-size:13px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.xray-sector-pct { font-size:13px; font-weight:700; min-width:40px; text-align:right; }
+.xray-sector-val { font-size:11px; color:var(--muted); min-width:60px; text-align:right; }
+.xray-sector-arrow { font-size:16px; color:var(--muted); margin-left:2px; transition:transform .15s; }
+.xray-sector-row.active .xray-sector-arrow { transform:rotate(90deg); }
+
+/* Inline row detail */
+.xray-row-detail { background:rgba(255,255,255,.02); border-radius:8px; margin:2px 0 6px; overflow:hidden; }
+.xray-detail-header { display:flex; align-items:center; gap:10px; padding:12px 14px 8px; flex-wrap:wrap; }
+.xray-detail-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+.xray-detail-title { font-size:13px; font-weight:600; }
+.xray-detail-meta { font-size:12px; color:var(--muted); }
+
+/* Holdings table */
+.xray-holdings-tbl { width:100%; border-collapse:collapse; font-size:12px; }
+.xray-holdings-tbl th { text-align:left; padding:5px 10px; font-size:10px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); border-bottom:1px solid var(--border); white-space:nowrap; }
+.xray-holdings-tbl td { padding:7px 10px; border-bottom:1px solid rgba(255,255,255,.04); }
+.xray-holdings-tbl tr:last-child td { border-bottom:none; }
+.xray-holdings-tbl .sym { font-weight:600; }
+.xray-holdings-tbl .num { text-align:right; }
+.xray-nm { max-width:180px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--muted); font-size:11px; }
+
 .toggle-label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; }
 .toggle-label input { accent-color: var(--accent); cursor: pointer; }
 

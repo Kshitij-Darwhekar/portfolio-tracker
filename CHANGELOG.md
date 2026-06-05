@@ -5,6 +5,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.5.0] — 2026-06-05
+
+### Added
+- **Portfolio X-Ray** — dedicated tab (alongside All / Equities / Mutual Funds / Fixed Income / EPF / Global / Bonds) for allocation drill-down; lazy-loaded only when the tab is active
+  - **Market Cap Allocation** — full-width segmented proportion bar (Large / Mid / Small / Unclassified) with pill tabs; clicking a pill filters the holdings table to that cap category with value, weight, return, and XIRR per stock
+  - **Sector Allocation** — compact donut chart (left) + scrollable sector rows (right); clicking any row or donut segment expands an inline holdings table; chevron rotates on expand
+  - **Mutual Fund Categories** — SEBI mandate category inferred from scheme name; top categories (Large Cap, Mid Cap, Large & Mid Cap, Flexi Cap, Small Cap) shown individually; all others collapsed into a single **Others** row that expands to reveal sub-categories, each further expandable to individual fund holdings
+  - **Smart insight** — auto-generated one-liner at the top (e.g. sector concentration warning, small cap overweight notice)
+  - **Scheme name as primary** in MF holdings tables — full scheme name shown in bold; ISIN shown as secondary muted text (previously reversed)
+
+- **Market cap + sector tagging** — two new nullable columns on the `instruments` table: `market_cap_category` (`large` | `mid` | `small`) and `sector` (e.g. `"Technology"`)
+  - Auto-migrated on startup
+  - Populated via **Refresh market data** button → `POST /api/refresh-market-meta`; uses yfinance `.info` for equities, SEBI thresholds (Large ≥ ₹40,000 Cr, Mid ₹8,000–40,000 Cr, Small < ₹8,000 Cr)
+  - Static override map (`INSTRUMENT_META_OVERRIDES`) for instruments yfinance cannot classify — applied at Refresh time (DB write) and at render time (runtime fallback): Gold ETFs → Gold; Liquid ETFs → Liquid / Debt; REITs → Real Estate / REITs; Index ETFs → Index ETF; SGBs → Gold / SGB
+  - Overrides applied automatically at X-Ray render time so GOLDBEES, LIQUIDCASE, EMBASSY etc. show correct sectors even before clicking Refresh
+
+### Fixed
+- **MF category misclassification** — scheme names using single-word variants (`midcap`, `multicap`) or ampersand (`Large & Mid Cap`) now correctly classified. Tata Nifty Midcap 150 Index Fund now maps to Mid Cap (not Index/ETF). Axis Consumption Fund maps to Sectoral/Thematic. 30+ keyword patterns added; all keywords sorted longest-first to prevent shorter patterns shadowing longer ones (e.g. `"large and mid cap"` checked before `"large cap"`)
+- **ETFs and REITs in Unclassified** — GOLDBEES, GOLDETFADD → Gold; LIQUIDCASE → Liquid/Debt; EMBASSY → Real Estate/REITs. yfinance returns `None` for sector on funds/trusts; these are now handled via the static override map
+
+### API
+- `GET /api/allocation` — market cap + sector breakdown for direct EQ; SEBI-category breakdown for MFs; each group includes holdings sorted by value
+- `POST /api/refresh-market-meta` — fetches sector + market_cap_category from yfinance for all EQ instruments; skips known overrides
+
+---
+
 ## [0.4.4] — 2026-06-04
 
 ### Added

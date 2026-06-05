@@ -35,6 +35,7 @@
       <button class="seg-btn" data-seg="EPF">EPF</button>
       <button class="seg-btn" data-seg="GLOBAL">Global</button>
       <button class="seg-btn" data-seg="BONDS">Bonds</button>
+      <button class="seg-btn" data-seg="XRAY">X-Ray</button>
     </div>
 
     <!-- Net Worth banner — shown on All tab only -->
@@ -93,6 +94,20 @@
           ⚠ Period &lt; 3 months — XIRR annualizes short-period returns, making them appear extreme. Use as a directional indicator only.
         </div>
         <div id="xirr-content" class="xirr-grid"></div>
+      </div>
+    </section>
+
+    <!-- Portfolio X-Ray (shown only when X-Ray tab is active) -->
+    <section class="card collapsible" data-section="allocation" style="display:none">
+      <div class="section-header row-between">
+        <h2>Portfolio X-Ray</h2>
+        <div class="actions">
+          <button id="refresh-market-meta-btn" class="btn-secondary">Refresh market data</button>
+          <button class="collapse-btn" data-target="allocation">▲</button>
+        </div>
+      </div>
+      <div class="section-body" id="body-allocation">
+        <div id="allocation-content"><div class="muted small">Loading…</div></div>
       </div>
     </section>
 

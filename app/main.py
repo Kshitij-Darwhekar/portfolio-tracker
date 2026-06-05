@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .analytics import (
+    compute_allocation_breakdown,
     compute_equity_curve,
     compute_fi_holdings,
     compute_fi_summary,
@@ -27,7 +28,7 @@ from .analytics import (
 from .corporate_actions import auto_fetch_all
 from .fi_rates import load_fi_rates, update_fi_rate
 from .db import (BondDetail, CorporateAction, EPFEntry, FixedIncome,
-                 GlobalEquityTransaction, NWSnapshot, SIPSchedule, Transaction,
+                 GlobalEquityTransaction, Instrument, NWSnapshot, SIPSchedule, Transaction,
                  get_session, init_db)
 from .importer import import_tradebook
 from .bond_analytics import compute_bond_holdings
@@ -458,6 +459,36 @@ def xirr_analysis(
     if from_date is None:
         result.update(compute_xirr_split(db, segment=segment or None))
     return result
+
+
+@app.get("/api/allocation")
+def get_allocation(db: Session = Depends(get_session)):
+    """Market cap + sector breakdown for direct EQ holdings; SEBI-category breakdown for MFs."""
+    return compute_allocation_breakdown(db)
+
+
+@app.post("/api/refresh-market-meta")
+def refresh_market_meta(db: Session = Depends(get_session)):
+    """Fetch sector + market_cap_category from yfinance for all EQ instruments.
+
+    Iterates every equity instrument in the instruments table and calls yfinance
+    .info to get the sector string and market cap (used to classify large/mid/small).
+    This is a slow call (~1-2s per instrument) — run it once, then it's cached in the DB.
+    """
+    from .prices import fetch_instrument_meta
+    instruments = db.execute(
+        select(Instrument).where(Instrument.segment == "EQ")
+    ).scalars().all()
+
+    updated, failed = 0, 0
+    for inst in instruments:
+        result = fetch_instrument_meta(db, inst)
+        if result.get("sector") or result.get("market_cap_category"):
+            updated += 1
+        else:
+            failed += 1
+
+    return {"updated": updated, "failed": failed, "total": len(instruments)}
 
 
 @app.get("/api/realized-pnl")

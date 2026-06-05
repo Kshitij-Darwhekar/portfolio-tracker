@@ -26,6 +26,7 @@ from .fi_calc import (
 )
 from .prices import (
     BENCHMARKS,
+    INSTRUMENT_META_OVERRIDES,
     fetch_benchmark_series,
     fill_forward,
     get_close_series,
@@ -854,6 +855,229 @@ def compute_summary(db: Session, today: date | None = None, segment: str | None 
 
 
 # ---------- equity curve ----------
+
+# Keywords sorted longest-first so longer matches take priority
+# (e.g. "large and mid cap" is checked before "large cap" and "mid cap").
+_MF_CAP_LABEL: list[tuple[str, str]] = sorted([
+    # Equity — market cap mandated (longer patterns first to avoid wrong substring matches)
+    ("large and mid cap",          "Large & Mid Cap"),
+    ("large & mid cap",            "Large & Mid Cap"),   # ampersand variant
+    ("large cap",                  "Large Cap"),
+    ("nifty midcap",               "Mid Cap"),           # midcap index funds
+    ("midcap 150",                 "Mid Cap"),
+    ("midcap 100",                 "Mid Cap"),
+    ("midcap 50",                  "Mid Cap"),
+    ("mid cap",                    "Mid Cap"),
+    ("midcap",                     "Mid Cap"),           # single-word variant
+    ("small cap",                  "Small Cap"),
+    ("flexi cap",                  "Flexi Cap"),
+    ("multicap",                   "Multi Cap"),         # single-word variant
+    ("multi cap",                  "Multi Cap"),
+    # Equity — strategy / style
+    ("elss",                       "ELSS (Tax Saver)"),
+    ("tax saver",                  "ELSS (Tax Saver)"),
+    ("focused",                    "Focused Fund"),
+    ("dividend yield",             "Dividend Yield"),
+    ("value",                      "Value / Contra"),
+    ("contra",                     "Value / Contra"),
+    ("sectoral",                   "Sectoral / Thematic"),
+    ("thematic",                   "Sectoral / Thematic"),
+    # Common sector fund names that don't say "sectoral" or "thematic"
+    ("consumption",                "Sectoral / Thematic"),
+    ("infrastructure",             "Sectoral / Thematic"),
+    ("banking",                    "Sectoral / Thematic"),
+    ("technology fund",            "Sectoral / Thematic"),
+    ("pharma",                     "Sectoral / Thematic"),
+    ("healthcare fund",            "Sectoral / Thematic"),
+    ("manufacturing",              "Sectoral / Thematic"),
+    ("business cycle",             "Sectoral / Thematic"),
+    ("opportunities fund",         "Sectoral / Thematic"),
+    ("innovation",                 "Sectoral / Thematic"),
+    ("esg",                        "Sectoral / Thematic"),
+    # Hybrid
+    ("aggressive hybrid",          "Aggressive Hybrid"),
+    ("conservative hybrid",        "Conservative Hybrid"),
+    ("balanced advantage",         "Dynamic / Balanced Advantage"),
+    ("dynamic asset allocation",   "Dynamic / Balanced Advantage"),
+    ("multi asset allocation",     "Multi Asset"),
+    ("multi asset",                "Multi Asset"),
+    ("arbitrage",                  "Arbitrage"),
+    ("hybrid",                     "Hybrid"),
+    ("balanced",                   "Hybrid"),
+    # Index / ETF
+    ("index",                      "Index / ETF"),
+    ("etf",                        "Index / ETF"),
+    ("nifty",                      "Index / ETF"),
+    ("sensex",                     "Index / ETF"),
+    # International / FOF
+    ("fund of funds",              "International / FOF"),
+    ("international",              "International / FOF"),
+    ("global",                     "International / FOF"),
+    ("world",                      "International / FOF"),
+    ("overseas",                   "International / FOF"),
+    # Debt
+    ("banking and psu",            "Debt (Banking & PSU)"),
+    ("corporate bond",             "Debt (Corporate Bond)"),
+    ("short duration",             "Debt (Short Duration)"),
+    ("low duration",               "Debt (Low Duration)"),
+    ("medium duration",            "Debt (Medium Duration)"),
+    ("long duration",              "Debt (Long Duration)"),
+    ("gilt",                       "Debt (Gilt)"),
+    ("floater",                    "Debt (Floater)"),
+    ("overnight",                  "Liquid / Debt"),
+    ("liquid",                     "Liquid / Debt"),
+    ("money market",               "Liquid / Debt"),
+    ("debt",                       "Liquid / Debt"),
+], key=lambda x: -len(x[0]))
+
+
+def _mf_category_label(scheme_name: str | None) -> str:
+    """Derive a SEBI category label from the scheme name.
+
+    Keywords are matched longest-first so more-specific patterns (e.g.
+    "large and mid cap") always win over shorter ones ("large cap", "mid cap").
+    """
+    n = (scheme_name or "").lower()
+    # Skip raw ISINs — they start with INF/IN0 and contain no category info
+    if n.startswith(("inf", "in0")) and len(n) < 14:
+        return "Other / Unknown"
+    for keyword, label in _MF_CAP_LABEL:
+        if keyword in n:
+            return label
+    return "Other / Unknown"
+
+
+def compute_allocation_breakdown(db: Session) -> dict:
+    """Market cap + sector breakdown for direct EQ holdings; SEBI-category breakdown for MFs.
+
+    Returns two top-level sections:
+      equity  — direct stocks grouped by market_cap_category and sector
+      mf      — MF holdings grouped by SEBI category (inferred from scheme name)
+
+    Each group contains the constituent holdings sorted by current value descending,
+    so the frontend can render both the summary bar and an expandable detail table.
+    """
+    today = date.today()
+
+    # ---- direct equity ----
+    eq_holdings = [
+        h for h in compute_holdings(db, today, segment="EQ")
+        if (h.quantity or 0) > 0 and h.current_value
+    ]
+    eq_total = sum(h.current_value for h in eq_holdings)
+
+    # Pull market_cap_category + sector from instruments table in one query
+    eq_syms = [h.symbol for h in eq_holdings]
+    inst_map: dict[str, "Instrument"] = {}
+    if eq_syms:
+        for inst in db.execute(
+            select(Instrument).where(Instrument.symbol.in_(eq_syms))
+        ).scalars().all():
+            inst_map[inst.symbol] = inst
+
+    cap_groups: dict[str, list] = defaultdict(list)
+    sector_groups: dict[str, list] = defaultdict(list)
+    unclassified_count = 0
+
+    for h in eq_holdings:
+        inst = inst_map.get(h.symbol)
+        cap_cat = (inst.market_cap_category if inst else None)
+        sector  = (inst.sector if inst else None)
+
+        # Runtime fallback: apply static overrides even if DB hasn't been refreshed yet
+        if not sector or not cap_cat:
+            ov = INSTRUMENT_META_OVERRIDES.get(h.symbol.upper(), {})
+            if not sector:
+                sector = ov.get("sector")
+            if not cap_cat:
+                cap_cat = ov.get("market_cap_category")
+
+        sector = sector or "Unclassified"
+        entry = {
+            "symbol":       h.symbol,
+            "display_name": h.display_name,
+            "value":        round(h.current_value, 2),
+            "pct":          round(h.current_value / eq_total * 100, 2) if eq_total else 0,
+            "xirr":         h.xirr,
+            "pct_return":   h.pct_return,
+        }
+        cap_groups[cap_cat or "unclassified"].append(entry)
+        sector_groups[sector].append(entry)
+        if not cap_cat:
+            unclassified_count += 1
+
+    _cap_order = {"large": 0, "mid": 1, "small": 2, "unclassified": 3}
+    _cap_labels = {"large": "Large Cap", "mid": "Mid Cap",
+                   "small": "Small Cap", "unclassified": "Unclassified"}
+    by_market_cap = [
+        {
+            "category": cat,
+            "label":    _cap_labels.get(cat, cat.title()),
+            "value":    round(sum(e["value"] for e in items), 2),
+            "pct":      round(sum(e["value"] for e in items) / eq_total * 100, 2) if eq_total else 0,
+            "holdings": sorted(items, key=lambda x: x["value"], reverse=True),
+        }
+        for cat, items in sorted(cap_groups.items(), key=lambda x: _cap_order.get(x[0], 99))
+    ]
+    by_sector = sorted(
+        [
+            {
+                "sector":   sect,
+                "value":    round(sum(e["value"] for e in items), 2),
+                "pct":      round(sum(e["value"] for e in items) / eq_total * 100, 2) if eq_total else 0,
+                "holdings": sorted(items, key=lambda x: x["value"], reverse=True),
+            }
+            for sect, items in sector_groups.items()
+        ],
+        key=lambda x: x["value"],
+        reverse=True,
+    )
+
+    # ---- mutual funds ----
+    mf_holdings = [
+        h for h in compute_holdings(db, today, segment="MF")
+        if (h.quantity or 0) > 0 and h.current_value
+    ]
+    mf_total = sum(h.current_value for h in mf_holdings)
+
+    mf_groups: dict[str, list] = defaultdict(list)
+    for h in mf_holdings:
+        label = _mf_category_label(h.display_name)
+        mf_groups[label].append({
+            "symbol":       h.symbol,
+            "display_name": h.display_name,
+            "value":        round(h.current_value, 2),
+            "pct":          round(h.current_value / mf_total * 100, 2) if mf_total else 0,
+            "xirr":         h.xirr,
+            "pct_return":   h.pct_return,
+        })
+    by_mf_category = sorted(
+        [
+            {
+                "category": cat,
+                "value":    round(sum(e["value"] for e in items), 2),
+                "pct":      round(sum(e["value"] for e in items) / mf_total * 100, 2) if mf_total else 0,
+                "holdings": sorted(items, key=lambda x: x["value"], reverse=True),
+            }
+            for cat, items in mf_groups.items()
+        ],
+        key=lambda x: x["value"],
+        reverse=True,
+    )
+
+    return {
+        "equity": {
+            "total_value":        round(eq_total, 2),
+            "by_market_cap":      by_market_cap,
+            "by_sector":          by_sector,
+            "unclassified_count": unclassified_count,
+        },
+        "mf": {
+            "total_value":    round(mf_total, 2),
+            "by_category":    by_mf_category,
+        },
+    }
+
 
 def compute_xirr_split(db: Session, segment: str | None = None) -> dict:
     """Split portfolio XIRR into active (currently held) vs closed (fully exited) positions.
