@@ -96,12 +96,14 @@ All configuration is via environment variables (see `.env.example`):
 | `APP_USERNAME` | `admin` | Basic Auth username (only used if a password is set) |
 | `APP_PASSWORD` | _(empty)_ | Set to require HTTP Basic Auth on every request. Empty = no auth. |
 | `ENABLE_DEBUG_ENDPOINTS` | _(empty)_ | Set to `1` to expose `/api/debug/*` (troubleshooting only) |
+| `NEXTCLOUD_URL` / `NEXTCLOUD_USER` / `NEXTCLOUD_APP_PASSWORD` | _(empty)_ | Off-device backup target for `scripts/backup.sh` (WebDAV). Use a Nextcloud **app password**, not your account password. |
+| `NEXTCLOUD_REMOTE_DIR` | `Backups/portfolio` | Folder inside Nextcloud to upload the DB to |
 
 ## Automation (`scripts/`)
 
 | Script | What it does | Example cron |
 |---|---|---|
-| `scripts/backup.sh` | Timestamped SQLite online backup, 7-snapshot retention, optional off-device copy | `13 2 * * *` (nightly 02:13) |
+| `scripts/backup.sh` | Timestamped SQLite online backup, 7-snapshot retention, optional off-device upload to Nextcloud (WebDAV) | `13 2 * * *` (nightly 02:13) |
 | `scripts/refresh-prices.sh` | Triggers a price/NAV refresh (auth-aware) | `47 18 * * 1-5` (weekdays after close) |
 | `scripts/update.sh` | Backup → `git pull` → rebuild, in one command | run manually after pushing |
 
@@ -233,6 +235,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 | Version | Date | Highlights |
 |---|---|---|
+| **0.6.1** | 2026-06-13 | Off-device backup to Nextcloud (WebDAV) in `backup.sh`; secrets read from `.env`, not crontab |
 | **0.6.0** | 2026-06-13 | Optional HTTP Basic Auth, debug endpoints gated, env-driven compose (`.env`/`DATA_DIR`), backup + price-refresh + update scripts, internal security review |
 | **0.5.1** | 2026-06-13 | Sell guard (only sell what you hold, with autocomplete + quantity check), loading progress bar on refresh, "Saving…" button feedback, segment-aware XIRR caption fix |
 | **0.5.0** | 2026-06-05 | Portfolio X-Ray tab: market cap proportion bar + pill tabs, sector donut, MF category drill-down with Others grouping, smart insight, ETF/REIT sector overrides |

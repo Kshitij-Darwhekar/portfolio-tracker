@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.6.1] — 2026-06-13
+
+### Added
+- **Off-device backup to Nextcloud** — `scripts/backup.sh` can now upload the DB to Nextcloud over WebDAV (so it registers in Nextcloud and syncs to your devices), instead of only copying to a local folder. Configured via `NEXTCLOUD_URL` / `NEXTCLOUD_USER` / `NEXTCLOUD_APP_PASSWORD` / `NEXTCLOUD_REMOTE_DIR` in `.env` (use a Nextcloud **app password**, never the account password). `backup.sh` now sources `.env`, so backup secrets stay out of the crontab. Disabled when the vars are empty (plain local snapshots only).
+
+---
+
 ## [0.6.0] — 2026-06-13
 
 ### Security
