@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.5.1] — 2026-06-13
+
+### Added
+- **Sell guard** — adding a *new* sell is now restricted to instruments you actually hold. The Symbol field has a `<datalist>` autocomplete populated from current holdings (qty > 0, across all segments); picking a held instrument auto-fills its ISIN and segment. On submit, a sell is blocked with a clear message if the symbol isn't held or if the quantity exceeds the held units. Buys (including new instruments) and edits of historical sells are unaffected.
+- **Loading indicator** — a thin indeterminate progress bar at the top of the page shows whenever the dashboard is reloading (Phase 1 of `refreshAll`) and clears when data is ready. Covers sells, tab switches, and price refreshes — removes the "frozen with no feedback" feeling after committing a transaction.
+- **Save button feedback** — the transaction Save button disables and shows "Saving…" while the transaction commits and the dashboard reloads, preventing double-submits.
+
+### Fixed
+- **XIRR caption mislabelled on segment tabs** — the Portfolio XIRR sub-label always read "equities + mutual funds" even on the Equities or Mutual Funds tab. The XIRR value was always correctly segment-scoped (via `segQS`); only the caption was wrong. It now reads "equities", "mutual funds", or "equities + mutual funds" to match the active tab.
+
+---
+
 ## [0.5.0] — 2026-06-05
 
 ### Added

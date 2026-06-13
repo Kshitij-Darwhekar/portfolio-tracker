@@ -182,5 +182,6 @@ XIRR computations. X-Ray is lazy-loaded on tab click only (not in either phase).
 
 ## Version
 
-Current: **v0.5.0** — Portfolio X-Ray tab (market cap, sector, MF category breakdown).
+Current: **v0.5.1** — Sell guard (held-only sells + qty check), loading progress bar,
+Save-button feedback, segment-aware XIRR caption fix.
 See CHANGELOG.md for full history.

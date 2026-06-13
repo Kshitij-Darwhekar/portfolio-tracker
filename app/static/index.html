@@ -10,6 +10,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
 </head>
 <body>
+  <div id="loading-bar"></div>
   <header>
     <h1>Portfolio Tracker</h1>
     <div class="actions">
@@ -653,7 +654,8 @@
       <h3 id="txn-form-title">Add transaction</h3>
       <input type="hidden" name="id" />
       <label>Date<input type="date" name="trade_date" required /></label>
-      <label>Symbol<input type="text" name="symbol" required /></label>
+      <label>Symbol<input type="text" name="symbol" list="txn-symbol-list" autocomplete="off" required /></label>
+      <datalist id="txn-symbol-list"></datalist>
       <label>ISIN<input type="text" name="isin" placeholder="optional" /></label>
       <div class="grid2">
         <label>Segment

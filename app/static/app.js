@@ -1485,7 +1485,11 @@ async function loadXirrAnalysis(period = "all", fromDate = null, toDate = null) 
 
     // Equity + MF portfolio XIRR — headline box with active/closed split footnote
     {
-      const subText = r.from_date ? `${r.from_date} → ${r.to_date}` : "equities + mutual funds";
+      // Label reflects the active tab — the XIRR is already segment-scoped via segQS()
+      const segLabel = activeSegment === "EQ" ? "equities"
+                     : activeSegment === "MF" ? "mutual funds"
+                     : "equities + mutual funds";
+      const subText = r.from_date ? `${r.from_date} → ${r.to_date}` : segLabel;
       // Active vs closed split: only available on all-time view (no from_date)
       let splitHtml = "";
       if (!r.from_date && (r.active_xirr != null || r.closed_xirr != null)) {
@@ -2381,11 +2385,43 @@ document.getElementById("import-input").addEventListener("change", async (e) => 
 const dialog = document.getElementById("txn-dialog");
 const form = document.getElementById("txn-form");
 
+// Instruments currently held (qty > 0) — used to suggest + restrict sell symbols.
+// Fetched without a segment filter so the picker is complete regardless of active tab.
+let sellableHoldings = [];
+
+async function refreshSymbolPicker() {
+  try {
+    sellableHoldings = (await api("/api/holdings")).filter((h) => (h.quantity || 0) > 0);
+  } catch {
+    sellableHoldings = [];
+  }
+  const dl = document.getElementById("txn-symbol-list");
+  if (!dl) return;
+  dl.innerHTML = sellableHoldings
+    .map((h) => {
+      const name = h.display_name && h.display_name !== h.symbol ? `${h.display_name} · ` : "";
+      return `<option value="${h.symbol}">${name}${h.segment} · ${fmtQty(h.quantity)} held</option>`;
+    })
+    .join("");
+}
+
+// When the typed/picked symbol matches a held instrument, auto-fill ISIN + segment
+// so a sell can't be mismatched. (Programmatic value sets during edit don't fire 'change'.)
+form.querySelector('input[name="symbol"]').addEventListener("change", (e) => {
+  const sym = e.target.value.trim().toUpperCase();
+  const match = sellableHoldings.find((h) => (h.symbol || "").toUpperCase() === sym);
+  if (match) {
+    form.querySelector('input[name="isin"]').value = match.isin || "";
+    form.querySelector('select[name="segment"]').value = match.segment;
+  }
+});
+
 document.getElementById("btn-add").addEventListener("click", () => {
   form.reset();
   form.querySelector('input[name="id"]').value = "";
   document.getElementById("txn-form-title").textContent = "Add transaction";
   form.querySelector('input[name="trade_date"]').valueAsDate = new Date();
+  refreshSymbolPicker();   // fire-and-forget; list is ready before the user submits
   dialog.showModal();
 });
 
@@ -2410,8 +2446,32 @@ form.addEventListener("submit", async (e) => {
     fees: parseFloat(fd.get("fees") || 0),
     notes: fd.get("notes") || null,
   };
+  // Guard new sells against typos: only allow selling instruments you actually hold,
+  // and not more than the held quantity. Skipped for edits (id present) because the
+  // current holdings already reflect that historical sell.
+  if (!id && payload.trade_type === "sell") {
+    if (!sellableHoldings.length) await refreshSymbolPicker();
+    const sym = (payload.symbol || "").trim().toUpperCase();
+    const match = sellableHoldings.find(
+      (h) => (h.symbol || "").toUpperCase() === sym && h.segment === payload.segment
+    );
+    if (!match) {
+      alert(`You don't currently hold "${payload.symbol}" in ${payload.segment}.\n` +
+            `Sells are only allowed for instruments you hold — pick one from the dropdown.`);
+      return;
+    }
+    if (payload.quantity > match.quantity + 1e-6) {
+      alert(`You only hold ${fmtQty(match.quantity)} units of ${payload.symbol}, ` +
+            `so you can't sell ${fmtQty(payload.quantity)}.`);
+      return;
+    }
+  }
+
   const url = id ? `/api/transactions/${id}` : "/api/transactions";
   const method = id ? "PATCH" : "POST";
+  const saveBtn = document.getElementById("txn-save");
+  saveBtn.disabled = true;
+  saveBtn.textContent = "Saving…";
   try {
     await api(url, {
       method,
@@ -2422,6 +2482,9 @@ form.addEventListener("submit", async (e) => {
     await refreshAll();
   } catch (err) {
     alert("Save failed: " + err.message);
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = "Save";
   }
 });
 
@@ -2655,6 +2718,10 @@ document.querySelector("#alias-table tbody").addEventListener("click", async (e)
   }
 });
 
+// Indeterminate top progress bar — shown while refreshAll's Phase 1 is in flight
+function showLoading() { document.getElementById("loading-bar")?.classList.add("active"); }
+function hideLoading() { document.getElementById("loading-bar")?.classList.remove("active"); }
+
 async function refreshAll(tabSwitch = false) {
   const realizedPeriod = document.getElementById("realized-period-select").value;
   const xirrPeriod    = document.getElementById("xirr-period-select").value;
@@ -2673,7 +2740,12 @@ async function refreshAll(tabSwitch = false) {
   if (!tabSwitch) {
     phase1.push(loadTransactions(), loadCorporateActions(), loadSymbolAliases());
   }
-  await Promise.all(phase1);
+  showLoading();
+  try {
+    await Promise.all(phase1);
+  } finally {
+    hideLoading();
+  }
 
   // Phase 2 — slow (equity curve + full XIRR + net worth): fire and forget
   Promise.all([

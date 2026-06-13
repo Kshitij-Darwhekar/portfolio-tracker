@@ -43,6 +43,8 @@ Self-hosted personal finance dashboard for Indian equities (NSE/BSE) and mutual 
 - Indian number formatting (₹1.52L, ₹10.5Cr)
 - Keyboard shortcuts: `N` = Add transaction, `R` = Refresh prices, `/` = Focus filter
 - Benchmarks in XIRR cards show `+X% vs index` delta
+- Top progress bar while the dashboard reloads; "Saving…" feedback on transaction commit
+- **Sell guard** — new sells are restricted to held instruments (autocomplete from holdings + quantity check) to prevent typos creating orphan sells
 
 ---
 
@@ -204,6 +206,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 | Version | Date | Highlights |
 |---|---|---|
+| **0.5.1** | 2026-06-13 | Sell guard (only sell what you hold, with autocomplete + quantity check), loading progress bar on refresh, "Saving…" button feedback, segment-aware XIRR caption fix |
 | **0.5.0** | 2026-06-05 | Portfolio X-Ray tab: market cap proportion bar + pill tabs, sector donut, MF category drill-down with Others grouping, smart insight, ETF/REIT sector overrides |
 | **0.4.4** | 2026-06-04 | Active vs Closed XIRR split in Portfolio XIRR card; MF Holdings P&L fix (unrealised only for active positions) |
 | **0.4.3** | 2026-06-03 | Net Worth load time 19.8s→3.5s (batch queries + TTL cache + frontend stale-while-revalidate) |
