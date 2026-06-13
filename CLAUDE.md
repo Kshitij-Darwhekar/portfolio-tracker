@@ -182,10 +182,10 @@ XIRR computations. X-Ray is lazy-loaded on tab click only (not in either phase).
 
 ## Version
 
-Current: **v0.6.1** — Optional HTTP Basic Auth (`APP_PASSWORD`), debug endpoints
+Current: **v0.6.2** — Optional HTTP Basic Auth (`APP_PASSWORD`), debug endpoints
 gated behind `ENABLE_DEBUG_ENDPOINTS`, env-driven compose (`.env` / `DATA_DIR`),
-`scripts/` (backup, refresh-prices, update), and Nextcloud WebDAV off-device
-backup in `backup.sh`. See CHANGELOG.md for full history.
+`scripts/` (backup, refresh-prices, update), Nextcloud WebDAV off-device backup,
+and non-root container (`appuser`, uid 1000). See CHANGELOG.md for full history.
 
 **Config**: all via env (see `.env.example`) — `DATA_DIR` (DB host path),
 `APP_USERNAME`/`APP_PASSWORD` (Basic Auth, off when password empty),

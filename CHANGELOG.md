@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.6.2] — 2026-06-14
+
+### Security
+- **Container no longer runs as root** — the image now creates a non-root `appuser` (uid 1000, matching the host DB owner) and switches to it via `USER`. Keeps write access to the bind-mounted `./data` while dropping root, so a compromise via a malicious upload no longer yields root inside the container.
+
+---
+
 ## [0.6.1] — 2026-06-13
 
 ### Added

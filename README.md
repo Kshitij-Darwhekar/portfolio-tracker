@@ -134,7 +134,8 @@ Set `APP_PASSWORD` in `.env` to enable built-in HTTP Basic Auth, and/or run behi
 ### Security notes
 
 - **Auth is opt-in.** Without `APP_PASSWORD`, every endpoint (including transaction delete/edit) is open to anyone who can reach the port. That's acceptable *only* behind a trusted VPN — a home LAN includes guests and IoT devices, so set `APP_PASSWORD` if the Pi isn't isolated.
-- **Recommended hardening follow-ups** (not yet applied, low severity): run the container as a non-root user (add a `USER` directive matching the DB volume's owner) and cap upload size to prevent a large-file OOM. Open an issue/PR when ready.
+- **Container runs as non-root** (`appuser`, uid 1000) as of v0.6.2.
+- **Remaining hardening follow-up** (low severity): cap upload size to prevent a large-file OOM during import. Low risk for a single-user, authenticated deployment.
 
 ---
 
@@ -235,6 +236,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 | Version | Date | Highlights |
 |---|---|---|
+| **0.6.2** | 2026-06-14 | Container runs as non-root (`appuser`, uid 1000) — drops root while keeping DB write access |
 | **0.6.1** | 2026-06-13 | Off-device backup to Nextcloud (WebDAV) in `backup.sh`; secrets read from `.env`, not crontab |
 | **0.6.0** | 2026-06-13 | Optional HTTP Basic Auth, debug endpoints gated, env-driven compose (`.env`/`DATA_DIR`), backup + price-refresh + update scripts, internal security review |
 | **0.5.1** | 2026-06-13 | Sell guard (only sell what you hold, with autocomplete + quantity check), loading progress bar on refresh, "Saving…" button feedback, segment-aware XIRR caption fix |
@@ -290,7 +292,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 ## Known limitations
 
-- Optional HTTP Basic Auth (`APP_PASSWORD`); otherwise run behind a VPN or reverse-proxy auth layer. Container still runs as root (hardening follow-up)
+- Optional HTTP Basic Auth (`APP_PASSWORD`); otherwise run behind a VPN or reverse-proxy auth layer
 - INR only; no multi-currency support
 - Mutual fund dividend reinvestment is captured from the CAS (appears as a buy transaction); separate dividend payouts are not yet tracked as cashflows
 - No tax reports or capital-gains schedules (use the Realized P&L panel as a starting point)
