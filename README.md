@@ -80,10 +80,32 @@ Open http://localhost:8000.
 ## Run in Docker (local or VPS)
 
 ```bash
+cp .env.example .env      # then edit .env if needed (DB path, auth password)
 docker compose up -d --build
 ```
 
-`./data/portfolio.db` is mounted into the container — persists across rebuilds.
+The DB host path comes from `DATA_DIR` in `.env` (defaults to `./data`), bind-mounted to `/app/data` — persists across rebuilds. On a Raspberry Pi / CasaOS host, set `DATA_DIR=/DATA/AppData/portfolio-tracker` in `.env` instead of editing the tracked compose file.
+
+## Configuration (`.env`)
+
+All configuration is via environment variables (see `.env.example`):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DATA_DIR` | `./data` | Host directory for the SQLite DB |
+| `APP_USERNAME` | `admin` | Basic Auth username (only used if a password is set) |
+| `APP_PASSWORD` | _(empty)_ | Set to require HTTP Basic Auth on every request. Empty = no auth. |
+| `ENABLE_DEBUG_ENDPOINTS` | _(empty)_ | Set to `1` to expose `/api/debug/*` (troubleshooting only) |
+
+## Automation (`scripts/`)
+
+| Script | What it does | Example cron |
+|---|---|---|
+| `scripts/backup.sh` | Timestamped SQLite online backup, 7-snapshot retention, optional off-device copy | `13 2 * * *` (nightly 02:13) |
+| `scripts/refresh-prices.sh` | Triggers a price/NAV refresh (auth-aware) | `47 18 * * 1-5` (weekdays after close) |
+| `scripts/update.sh` | Backup → `git pull` → rebuild, in one command | run manually after pushing |
+
+Edit a crontab with `crontab -e`. Each script takes config via environment variables (see the header comment in each file).
 
 ## VPS deployment with HTTPS (nginx + certbot)
 
@@ -105,7 +127,12 @@ server {
 }
 ```
 
-No built-in auth — run behind a VPN, `nginx auth_basic`, or Authelia.
+Set `APP_PASSWORD` in `.env` to enable built-in HTTP Basic Auth, and/or run behind a VPN, `nginx auth_basic`, or Authelia.
+
+### Security notes
+
+- **Auth is opt-in.** Without `APP_PASSWORD`, every endpoint (including transaction delete/edit) is open to anyone who can reach the port. That's acceptable *only* behind a trusted VPN — a home LAN includes guests and IoT devices, so set `APP_PASSWORD` if the Pi isn't isolated.
+- **Recommended hardening follow-ups** (not yet applied, low severity): run the container as a non-root user (add a `USER` directive matching the DB volume's owner) and cap upload size to prevent a large-file OOM. Open an issue/PR when ready.
 
 ---
 
@@ -206,6 +233,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 | Version | Date | Highlights |
 |---|---|---|
+| **0.6.0** | 2026-06-13 | Optional HTTP Basic Auth, debug endpoints gated, env-driven compose (`.env`/`DATA_DIR`), backup + price-refresh + update scripts, internal security review |
 | **0.5.1** | 2026-06-13 | Sell guard (only sell what you hold, with autocomplete + quantity check), loading progress bar on refresh, "Saving…" button feedback, segment-aware XIRR caption fix |
 | **0.5.0** | 2026-06-05 | Portfolio X-Ray tab: market cap proportion bar + pill tabs, sector donut, MF category drill-down with Others grouping, smart insight, ETF/REIT sector overrides |
 | **0.4.4** | 2026-06-04 | Active vs Closed XIRR split in Portfolio XIRR card; MF Holdings P&L fix (unrealised only for active positions) |
@@ -259,7 +287,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 ## Known limitations
 
-- No auth — run behind a VPN or reverse-proxy auth layer
+- Optional HTTP Basic Auth (`APP_PASSWORD`); otherwise run behind a VPN or reverse-proxy auth layer. Container still runs as root (hardening follow-up)
 - INR only; no multi-currency support
 - Mutual fund dividend reinvestment is captured from the CAS (appears as a buy transaction); separate dividend payouts are not yet tracked as cashflows
 - No tax reports or capital-gains schedules (use the Realized P&L panel as a starting point)

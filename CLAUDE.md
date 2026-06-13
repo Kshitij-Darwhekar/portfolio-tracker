@@ -182,6 +182,10 @@ XIRR computations. X-Ray is lazy-loaded on tab click only (not in either phase).
 
 ## Version
 
-Current: **v0.5.1** — Sell guard (held-only sells + qty check), loading progress bar,
-Save-button feedback, segment-aware XIRR caption fix.
-See CHANGELOG.md for full history.
+Current: **v0.6.0** — Optional HTTP Basic Auth (`APP_PASSWORD`), debug endpoints
+gated behind `ENABLE_DEBUG_ENDPOINTS`, env-driven compose (`.env` / `DATA_DIR`),
+and `scripts/` (backup, refresh-prices, update). See CHANGELOG.md for full history.
+
+**Config**: all via env (see `.env.example`) — `DATA_DIR` (DB host path),
+`APP_USERNAME`/`APP_PASSWORD` (Basic Auth, off when password empty),
+`ENABLE_DEBUG_ENDPOINTS`. Auth middleware lives at the top of `main.py`.

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import base64
 import csv
 import io
+import os
+import secrets
 from datetime import date, datetime
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -48,7 +51,41 @@ from .xirr import xirr
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
-app = FastAPI(title="Portfolio Tracker", version="0.1.0")
+# --- security config (all opt-in via environment) ---
+# APP_PASSWORD unset/empty  → auth disabled (default; same as before).
+# APP_PASSWORD set          → every request requires HTTP Basic Auth.
+# Browsers prompt once and cache the credentials, so the SPA + API just work.
+APP_USERNAME = os.environ.get("APP_USERNAME", "admin")
+APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
+# Debug endpoints are off unless explicitly enabled.
+ENABLE_DEBUG_ENDPOINTS = os.environ.get("ENABLE_DEBUG_ENDPOINTS", "").strip().lower() in ("1", "true", "yes", "on")
+
+app = FastAPI(title="Portfolio Tracker", version="0.6.0")
+
+
+@app.middleware("http")
+async def basic_auth(request: Request, call_next):
+    """Gate the whole app behind HTTP Basic Auth when APP_PASSWORD is set.
+    No-op when unset, so local/dev use is unchanged. Uses constant-time
+    comparison to avoid leaking credentials via timing."""
+    if APP_PASSWORD:
+        header = request.headers.get("Authorization", "")
+        authorized = False
+        if header.startswith("Basic "):
+            try:
+                user, _, pwd = base64.b64decode(header[6:]).decode("utf-8").partition(":")
+                authorized = (
+                    secrets.compare_digest(user, APP_USERNAME)
+                    and secrets.compare_digest(pwd, APP_PASSWORD)
+                )
+            except Exception:
+                authorized = False
+        if not authorized:
+            return Response(
+                status_code=401,
+                headers={"WWW-Authenticate": 'Basic realm="Portfolio Tracker"'},
+            )
+    return await call_next(request)
 
 
 @app.on_event("startup")
@@ -195,6 +232,8 @@ async def debug_epf_pdf(file: UploadFile = File(...)):
     PII patterns (UAN, Member ID, DOB, mobile) are redacted automatically.
     Use this when the normal import returns 0 entries to see what text PyMuPDF extracts.
     """
+    if not ENABLE_DEBUG_ENDPOINTS:
+        raise HTTPException(404, "Not found")
     import fitz, tempfile, os, re
     content = await file.read()
     pii_patterns = [
@@ -922,6 +961,8 @@ def debug_cashflows(db: Session = Depends(get_session)):
     Useful to sanity-check the XIRR result. Final inflow is today's portfolio
     value; sum across all flows shows aggregate net P&L.
     """
+    if not ENABLE_DEBUG_ENDPOINTS:
+        raise HTTPException(404, "Not found")
     today = date.today()
     txns = db.execute(select(Transaction).order_by(Transaction.trade_date, Transaction.id)).scalars().all()
     flows = portfolio_cashflows(db, txns)

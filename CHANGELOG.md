@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.6.0] — 2026-06-13
+
+### Security
+- **Optional HTTP Basic Auth** — set `APP_PASSWORD` (and optionally `APP_USERNAME`, default `admin`) to require a login on every request. Uses constant-time credential comparison. **Off by default** — when `APP_PASSWORD` is unset the app behaves exactly as before. Closes the "anyone on the LAN can read/modify financial data" gap for deployments where VPN-only isn't enough.
+- **Debug endpoints gated** — `/api/debug/cashflows` and `/api/epf/debug-pdf` now return 404 unless `ENABLE_DEBUG_ENDPOINTS=1`. They are off by default, removing debug tooling from the production attack surface.
+- Internal security review (no findings in committed code): SQL is fully parameterized (no injection), no secrets/PII/personal data in source or git history, uploaded PII-bearing PDFs are reliably deleted from `/tmp`, and EPF imports persist only financial fields. Remaining hardening (non-root container user, upload size limit) documented as follow-ups in the README.
+
+### Added
+- **Environment-driven configuration** — `docker-compose.yml` now reads `DATA_DIR`, `APP_USERNAME`, `APP_PASSWORD`, and `ENABLE_DEBUG_ENDPOINTS` from a `.env` file (see `.env.example`). The DB host path is no longer hard-coded, so the same tracked compose file works for local dev and the Pi without per-host edits — and `git pull` never conflicts on it.
+- **Automation scripts** (`scripts/`):
+  - `backup.sh` — timestamped SQLite online backup (`.backup`), 7-snapshot retention, optional off-device copy to a Nextcloud-synced folder
+  - `refresh-prices.sh` — cron-friendly price/NAV refresh (auth-aware; reads creds from `.env`)
+  - `update.sh` — backup → `git pull` → rebuild, in one command
+
+---
+
 ## [0.5.1] — 2026-06-13
 
 ### Added

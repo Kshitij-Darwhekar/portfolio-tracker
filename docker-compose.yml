@@ -6,6 +6,14 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./data:/app/data
+      # Host path for the SQLite DB. Override DATA_DIR in .env (e.g. on the Pi:
+      # DATA_DIR=/DATA/AppData/portfolio-tracker). Defaults to ./data for local dev.
+      - ${DATA_DIR:-./data}:/app/data
     environment:
       - TZ=Asia/Kolkata
+      # Optional HTTP Basic Auth — set APP_PASSWORD in .env to require a login.
+      # Leave unset to disable auth (default).
+      - APP_USERNAME=${APP_USERNAME:-admin}
+      - APP_PASSWORD=${APP_PASSWORD:-}
+      # Set to 1 only when troubleshooting imports; exposes /api/debug/* routes.
+      - ENABLE_DEBUG_ENDPOINTS=${ENABLE_DEBUG_ENDPOINTS:-}
