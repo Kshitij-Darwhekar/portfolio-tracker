@@ -45,6 +45,26 @@ const fmtPct = (n) => (n == null || isNaN(n) ? "—" : (n * 100).toFixed(2) + "%
 const fmtQty = (n) => (n == null ? "—" : privacyMode ? MASK : Number(n).toLocaleString("en-IN", { maximumFractionDigits: 4 }));
 const cls = (n) => (n == null ? "" : n > 0 ? "pos" : n < 0 ? "neg" : "");
 
+// Amount that stays compact (₹4.32L) but reveals the exact value (₹4,32,123.45)
+// on hover (desktop, native title) or tap (mobile, toggles the text). Only wraps
+// when fmtINR actually abbreviates (≥ ₹1L); smaller amounts are already exact.
+// Returns plain fmtINR in privacy mode so the exact value is never exposed.
+function amt(n) {
+  if (n == null || isNaN(n) || privacyMode) return fmtINR(n);
+  const short = fmtINR(n);
+  const exact = (n < 0 ? "-₹" : "₹") + Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  if (short === exact) return short;
+  return `<span class="amt" title="${exact}" data-short="${short}" data-full="${exact}">${short}</span>`;
+}
+// Tap an .amt to toggle exact ↔ compact (for phones, which have no hover).
+document.addEventListener("click", (e) => {
+  const el = e.target.closest && e.target.closest(".amt");
+  if (!el || !el.dataset.full) return;
+  const showingFull = el.dataset.showing === "full";
+  el.textContent = showingFull ? el.dataset.short : el.dataset.full;
+  el.dataset.showing = showingFull ? "short" : "full";
+});
+
 // Global — used in multiple places including error handlers
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
@@ -2099,26 +2119,26 @@ async function loadSummary() {
   const card = (title, value, sub, klass = "") =>
     `<div class="card"><h3>${title}</h3><div class="value ${klass}">${value}</div>${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
 
-  cards.innerHTML += card("Invested", fmtINR(s.invested), "active holdings cost basis");
-  cards.innerHTML += card("Current Value", fmtINR(s.current_value), "active holdings at market");
+  cards.innerHTML += card("Invested", amt(s.invested), "active holdings cost basis");
+  cards.innerHTML += card("Current Value", amt(s.current_value), "active holdings at market");
   // Unrealized P&L — directly comparable to Zerodha's portfolio widget
   cards.innerHTML += card(
     "Unrealized P&L",
-    fmtINR(s.unrealized_pnl),
+    amt(s.unrealized_pnl),
     fmtPct(s.unrealized_pnl != null && s.invested ? s.unrealized_pnl / s.invested : null) + " · active only",
     cls(s.unrealized_pnl)
   );
   // Realized P&L — from all sold positions (shown separately in Zerodha's P&L report)
   cards.innerHTML += card(
     "Realized P&L",
-    fmtINR(s.realized_pnl),
+    amt(s.realized_pnl),
     "sold positions",
     cls(s.realized_pnl)
   );
   // Total = unrealized + realized
   cards.innerHTML += card(
     "Total P&L",
-    fmtINR(s.total_pnl),
+    amt(s.total_pnl),
     fmtPct(s.pct_return) + " · all-time",
     cls(s.total_pnl)
   );
@@ -2194,11 +2214,11 @@ function renderHoldings() {
         ${folioCell}
         <td>${r.segment}</td>
         <td class="num">${fmtQty(r.quantity)}</td>
-        <td class="num">${fmtINR(r.avg_cost)}</td>
-        <td class="num">${fmtINR(r.current_price)}</td>
-        <td class="num">${fmtINR(r.invested)}</td>
-        <td class="num">${fmtINR(r.current_value)}</td>
-        <td class="num ${cls(pnl)}">${fmtINR(pnl)}${hasRealized ? `<div class="muted" style="font-size:10px" title="Realized gain from past switch/sale">${fmtINR(r.realized_pnl)} realized</div>` : ''}</td>
+        <td class="num">${amt(r.avg_cost)}</td>
+        <td class="num">${amt(r.current_price)}</td>
+        <td class="num">${amt(r.invested)}</td>
+        <td class="num">${amt(r.current_value)}</td>
+        <td class="num ${cls(pnl)}">${amt(pnl)}${hasRealized ? `<div class="muted" style="font-size:10px" title="Realized gain from past switch/sale">${fmtINR(r.realized_pnl)} realized</div>` : ''}</td>
         <td class="num ${cls(r.pct_return)}">${fmtPct(r.pct_return)}</td>
         <td class="num ${cls(r.xirr)}">${fmtPct(r.xirr)}</td>
       </tr>`;

@@ -46,6 +46,7 @@ Self-hosted personal finance dashboard for Indian equities (NSE/BSE) and mutual 
 - Top progress bar while the dashboard reloads; "Saving…" feedback on transaction commit
 - **Privacy mode** — eye-icon toggle hides all ₹/$ amounts and portfolio size (rendered as `••••`, charts blurred) while keeping percentages visible; for safe screenshots/demos. Persists across reloads
 - **Sell guard** — new sells are restricted to held instruments (autocomplete from holdings + quantity check) to prevent typos creating orphan sells
+- **Responsive** — adapts to phone/tablet (used over Twingate); summary amounts reveal their exact value on hover/tap
 
 ---
 
@@ -237,6 +238,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 | Version | Date | Highlights |
 |---|---|---|
+| **0.7.2** | 2026-06-14 | Responsive mobile/tablet layout; hover/tap to reveal exact amounts (₹4.32L → ₹4,32,123.45) in Equities/MF cards + holdings |
 | **0.7.1** | 2026-06-14 | Analytics result caching — repeat dashboard loads ~3× faster (summary 1.1s→14ms, net worth 2.1s→0.2s); K formatting scoped to the Net Worth summary |
 | **0.7.0** | 2026-06-14 | Privacy mode — eye-icon toggle hides all amounts/portfolio size (charts blurred, percentages kept) for screenshots/demos |
 | **0.6.2** | 2026-06-14 | Container runs as non-root (`appuser`, uid 1000) — drops root while keeping DB write access |

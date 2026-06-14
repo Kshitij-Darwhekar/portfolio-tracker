@@ -42,6 +42,11 @@
    Amounts are masked to dots in JS; percentages stay visible. */
 .chart-blur { filter: blur(9px); pointer-events: none; }
 
+/* Amounts that reveal their exact value on hover (desktop) / tap (mobile).
+   Subtle dotted underline only on hover so it isn't noisy at rest. */
+.amt { cursor: help; }
+.amt:hover { text-decoration: underline dotted; text-underline-offset: 2px; }
+
 /* Eye-icon button — matches header buttons; swaps eye / eye-off by state */
 .icon-btn {
   display: inline-flex;
@@ -435,3 +440,84 @@ th.sortable:hover { color: var(--text); }
 th.sortable.asc  .sort-icon::after { content: " ↑"; color: var(--accent); }
 th.sortable.desc .sort-icon::after { content: " ↓"; color: var(--accent); }
 th.sortable:not(.asc):not(.desc) .sort-icon::after { content: " ⇅"; opacity: 0.3; }
+
+/* ============================================================
+   Responsive layout — desktop is the default; these only kick
+   in at narrower widths (tablet / phone). Phone is used over
+   Twingate, so the dashboard must be usable in portrait.
+   ============================================================ */
+
+/* Tablet / small laptop */
+@media (max-width: 1024px) {
+  header { padding: 13px 18px; }
+  main { padding: 18px 18px; }
+  .fi-charts-grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* Phone (portrait) and small tablets */
+@media (max-width: 680px) {
+  header { padding: 11px 14px; }
+  header h1 { font-size: 16px; }
+  #as-of { display: none; }              /* date also shown in the Net Worth / summary sections */
+  main { padding: 12px 12px; gap: 14px; }
+
+  /* Summary cards: 2 per row on a phone */
+  .cards { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+  .card { padding: 13px 14px; }
+  .cards .card .value { font-size: 18px; }
+
+  /* Collapse every multi-column layout to a single column */
+  .grid2,
+  .fi-charts-grid,
+  .realized-grid { grid-template-columns: 1fr; }
+
+  /* Net Worth: donut drops below the headline instead of beside it */
+  .nw-header { flex-direction: column; align-items: stretch; gap: 14px; }
+  .nw-total { font-size: 26px; }
+  #nw-donut { align-self: center; }
+
+  /* X-Ray: sector donut stacks above its rows */
+  .xray-sector-layout { flex-direction: column; }
+  .xray-sector-donut { align-self: center; }
+
+  /* Charts a touch shorter so they don't fill the whole screen */
+  .chart-container { height: 260px; }
+
+  /* Segment tabs wrap to a second row rather than squashing */
+  .segment-tabs { flex-wrap: wrap; }
+
+  /* FI maturity-timeline label narrower to leave room for the bar */
+  .fi-timeline-label { width: 110px; min-width: 110px; }
+
+  /* Holdings filter spans the row */
+  .filter-input { width: 100%; }
+
+  /* Dialogs fit small screens */
+  dialog { min-width: 0; width: min(360px, 92vw); }
+
+  /* Wide tables remain horizontally scrollable (momentum scroll on iOS) */
+  .table-wrap { -webkit-overflow-scrolling: touch; }
+
+  /* (1) Section headers + their button groups WRAP instead of overflowing the
+     screen — the un-wrapped Transactions/Corporate-Actions/Bonds button rows were
+     pushing the page wider than the viewport and shifting everything sideways. */
+  .section-header,
+  .row-between { flex-wrap: wrap; gap: 8px 10px; }
+  .actions { flex-wrap: wrap; }
+
+  /* (2) Keep button + badge labels on a single line (they were wrapping to 3–4
+     lines, e.g. "Import Tradebook (CSV/XLSX)", "Capital gains EXEMPT at maturity").
+     With the wrapping containers above, each control just flows to the next row. */
+  button, .btn-like { white-space: nowrap; }
+  .fi-badge { white-space: nowrap; }
+
+  /* (3) XIRR analysis: 2 tiles per row instead of 1, with the headline Portfolio
+     box spanning the full width — turns 5 stacked rows into a compact 3. */
+  .xirr-grid { grid-template-columns: 1fr 1fr; }
+  .xirr-grid .portfolio-box { grid-column: 1 / -1; }
+  .xirr-box .xirr-val { font-size: 19px; }
+
+  /* Backstop: never let a stray wide element scroll the whole page sideways.
+     Tables keep their own internal scroll via .table-wrap. */
+  html, body { overflow-x: hidden; }
+}

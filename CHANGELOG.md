@@ -5,6 +5,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.7.2] — 2026-06-14
+
+### Added
+- **Responsive layout (mobile / tablet)** — the dashboard now adapts to small screens (it's used on a phone over Twingate). Summary cards go 2-per-row, multi-column grids (FI charts, realized P&L) collapse to one column, the Net Worth donut and X-Ray sector donut stack below their text, charts shorten, segment tabs wrap, and dialogs fit small screens. Previously there were *no* media queries at all.
+- **Hover / tap to reveal exact amounts** — in the Equities/MF/All summary cards and holdings table, compact values (₹4.32L) reveal the exact figure (₹4,32,123.45) on **hover** (desktop) or **tap** (mobile) via a new `amt()` helper. Only abbreviated amounts (≥ ₹1L) get it; respects privacy mode (no reveal when masked); the Net Worth summary stays compact.
+
+### Fixed
+- **Mobile overflow / alignment** — section-header button groups (Transactions, Corporate Actions, Bonds) now wrap instead of pushing the page wider than the viewport; added a page-level `overflow-x` guard (tables keep their own scroll).
+- **Multi-line button/badge labels** — "Import Tradebook (CSV/XLSX)", "Capital gains EXEMPT at maturity", etc. now stay on one line and flow to the next row instead of wrapping into 3–4 lines.
+- **XIRR Analysis on mobile** — tiles now show 2-per-row with the Portfolio box full-width (was 5 tall stacked tiles).
+
+---
+
 ## [0.7.1] — 2026-06-14
 
 ### Performance

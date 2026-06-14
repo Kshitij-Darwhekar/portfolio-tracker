@@ -182,7 +182,9 @@ XIRR computations. X-Ray is lazy-loaded on tab click only (not in either phase).
 
 ## Version
 
-Current: **v0.7.1** — Analytics result caching (in-process, fingerprint-keyed:
+Current: **v0.7.2** — Responsive mobile/tablet layout (media queries in styles.css;
+none existed before) + hover/tap-to-reveal exact amounts (`amt()` helper) in
+Equities/MF summary cards + holdings. Plus v0.7.1: Analytics result caching (in-process, fingerprint-keyed:
 holdings/curve/summary/xirr/realized/data-quality/networth; `cached_call` +
 `_data_fingerprint` + `invalidate_analytics_cache` in analytics.py; 30-min TTL;
 refresh-prices invalidates + pre-warms). K formatting scoped to Net Worth summary
