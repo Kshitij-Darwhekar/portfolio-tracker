@@ -257,20 +257,24 @@ def fetch_instrument_meta(db: Session, inst: "Instrument") -> dict:
         db.commit()
         return {"sector": sector, "market_cap_category": cap_cat}
 
+    # Cap category: prefer the official NSE/AMFI rank-based list (stable; doesn't
+    # flip with the share price). yfinance market cap is only a fallback for the
+    # rare holding outside the top-500 lists.
+    from .cap_classification import get_cap_category
+    cap_cat = get_cap_category(inst.isin, sym)
+
     ticker_str = inst.yf_ticker or resolve_yf_ticker(sym, "NSE")
     try:
         info = yf.Ticker(ticker_str).info
-        market_cap = info.get("marketCap") or 0
-        sector     = info.get("sector") or None
-
-        if market_cap >= _LARGE_CAP_MIN_INR:
-            cap_cat = "large"
-        elif market_cap >= _MID_CAP_MIN_INR:
-            cap_cat = "mid"
-        elif market_cap > 0:
-            cap_cat = "small"
-        else:
-            cap_cat = None
+        sector = info.get("sector") or None
+        if cap_cat is None:
+            market_cap = info.get("marketCap") or 0
+            if market_cap >= _LARGE_CAP_MIN_INR:
+                cap_cat = "large"
+            elif market_cap >= _MID_CAP_MIN_INR:
+                cap_cat = "mid"
+            elif market_cap > 0:
+                cap_cat = "small"
 
         inst.market_cap_category = cap_cat
         inst.sector = sector
@@ -278,6 +282,11 @@ def fetch_instrument_meta(db: Session, inst: "Instrument") -> dict:
         return {"sector": sector, "market_cap_category": cap_cat}
     except Exception as exc:
         log.warning("fetch_instrument_meta failed for %s: %s", ticker_str, exc)
+        # yfinance failed, but we may still have a list-based cap — persist it.
+        if cap_cat is not None:
+            inst.market_cap_category = cap_cat
+            db.commit()
+            return {"sector": inst.sector, "market_cap_category": cap_cat}
         return {"sector": None, "market_cap_category": None}
 
 

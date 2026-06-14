@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.7.4] — 2026-06-14
+
+### Changed
+- **Large/Mid/Small-cap classification now uses the official NSE/AMFI ranking** instead of live yfinance market cap. Category is determined by membership in **NIFTY 100 / Midcap 150 / Smallcap 250** (the same top-100 / next-150 / next-250 ranking SEBI/AMFI use), matched to holdings by **ISIN, then symbol**.
+  - Fixes misclassifications (e.g. APARINDS now correctly **Mid**, not Large) and stops a stock's category from flipping with its share price.
+  - New `app/cap_classification.py` fetches the three NSE constituent CSVs (browser UA), caches the parsed map to `data/cap_classification.json` (disk-persisted, 7-day TTL) so a fetch failure / offline run falls back to the last good copy. Only the **Refresh market data** action hits the network.
+  - `fetch_instrument_meta` now sources cap from the list; yfinance `marketCap` is only a fallback for the rare holding outside the top 500. Sector still comes from yfinance.
+
+---
+
 ## [0.7.3] — 2026-06-14
 
 ### Changed

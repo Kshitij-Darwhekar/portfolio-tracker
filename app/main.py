@@ -62,7 +62,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 # Debug endpoints are off unless explicitly enabled.
 ENABLE_DEBUG_ENDPOINTS = os.environ.get("ENABLE_DEBUG_ENDPOINTS", "").strip().lower() in ("1", "true", "yes", "on")
 
-app = FastAPI(title="Portfolio Tracker", version="0.7.3")
+app = FastAPI(title="Portfolio Tracker", version="0.7.4")
 
 
 @app.middleware("http")
@@ -524,26 +524,34 @@ def get_allocation(db: Session = Depends(get_session)):
 
 @app.post("/api/refresh-market-meta")
 def refresh_market_meta(db: Session = Depends(get_session)):
-    """Fetch sector + market_cap_category from yfinance for all EQ instruments.
+    """Refresh sector + market_cap_category for all EQ instruments.
 
-    Iterates every equity instrument in the instruments table and calls yfinance
-    .info to get the sector string and market cap (used to classify large/mid/small).
-    This is a slow call (~1-2s per instrument) — run it once, then it's cached in the DB.
+    Cap category comes from NSE's official rank-based lists (NIFTY 100 / Midcap 150 /
+    Smallcap 250), refreshed here once; sector still comes from yfinance .info.
+    Run after imports or twice a year when NSE updates its lists.
     """
     from .prices import fetch_instrument_meta
+    from .cap_classification import _load_cap_index
+
+    n_listed = _load_cap_index(force=True)   # fetch the NSE constituent lists once
     instruments = db.execute(
         select(Instrument).where(Instrument.segment == "EQ")
     ).scalars().all()
 
-    updated, failed = 0, 0
+    updated, failed, classified = 0, 0, 0
     for inst in instruments:
         result = fetch_instrument_meta(db, inst)
+        if result.get("market_cap_category"):
+            classified += 1
         if result.get("sector") or result.get("market_cap_category"):
             updated += 1
         else:
             failed += 1
 
-    return {"updated": updated, "failed": failed, "total": len(instruments)}
+    return {
+        "updated": updated, "failed": failed, "total": len(instruments),
+        "cap_classified": classified, "cap_list_size": n_listed,
+    }
 
 
 @app.get("/api/realized-pnl")

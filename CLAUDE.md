@@ -133,13 +133,21 @@ XIRR computations. X-Ray is lazy-loaded on tab click only (not in either phase).
 
 ---
 
-## SEBI market cap thresholds (used in prices.py)
+## Market cap classification (Large / Mid / Small)
 
-| Category | Market cap |
+**Source of truth: the official NSE/AMFI rank-based lists** (`app/cap_classification.py`),
+not a live market-cap number:
+
+| Category | NSE index (rank) |
 |---|---|
-| Large cap | ≥ ₹40,000 Cr |
-| Mid cap | ₹8,000 – ₹40,000 Cr |
-| Small cap | < ₹8,000 Cr |
+| Large cap | NIFTY 100 (1–100) |
+| Mid cap | NIFTY Midcap 150 (101–250) |
+| Small cap | NIFTY Smallcap 250 (251–500) |
+
+Matched to holdings by **ISIN → symbol**; cached at `data/cap_classification.json`.
+Refreshed via the X-Ray "Refresh market data" button. The old yfinance `marketCap`
+vs ₹40,000 Cr / ₹8,000 Cr thresholds (`_LARGE_CAP_MIN_INR` / `_MID_CAP_MIN_INR` in
+prices.py) is now only a **fallback** for stocks outside the top 500.
 
 ---
 
@@ -182,7 +190,17 @@ XIRR computations. X-Ray is lazy-loaded on tab click only (not in either phase).
 
 ## Version
 
-Current: **v0.7.3** — `backup.sh` keeps a dated 7-day history in Nextcloud
+**Versioning policy — [Semantic Versioning](https://semver.org) (`MAJOR.MINOR.PATCH`), paired with [Keep a Changelog](https://keepachangelog.com):**
+- **MAJOR** — breaking changes. Pre-1.0, we stay at `0`.
+- **MINOR** (`0.X.0`) — a new user-facing **feature** (e.g. privacy mode, mobile layout, the planned insights panel).
+- **PATCH** (`0.0.X`) — **bug fixes, perf, and small improvements** (e.g. caching, dated backups, the cap-classification fix). Most changes are patches.
+
+When in doubt: "does this add a capability the user didn't have?" → MINOR; "does it fix/improve something that existed?" → PATCH.
+
+Current: **v0.7.4** — Large/Mid/Small-cap classification now uses the official
+NSE/AMFI ranking (NIFTY 100/Midcap 150/Smallcap 250 via `app/cap_classification.py`,
+matched by ISIN→symbol, disk-cached) instead of live yfinance market cap; fixes
+misclassifications. Plus v0.7.3: `backup.sh` keeps a dated 7-day history in Nextcloud
 (`portfolio-YYYY-MM-DD.db` + `-latest`, WebDAV-pruned). Plus v0.7.2: Responsive mobile/tablet layout (media queries in styles.css;
 none existed before) + hover/tap-to-reveal exact amounts (`amt()` helper) in
 Equities/MF summary cards + holdings. Plus v0.7.1: Analytics result caching (in-process, fingerprint-keyed:

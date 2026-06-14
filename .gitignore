@@ -11,6 +11,9 @@ data/*.db-journal
 # User-defined symbol aliases — may reveal holdings
 data/symbol_aliases.json
 
+# Cached NSE cap-classification lists (re-fetched on demand)
+data/cap_classification.json
+
 # Raw import files — tradebook, CAS statements, broker exports
 *.csv
 *.xlsx
