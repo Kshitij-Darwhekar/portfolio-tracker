@@ -182,7 +182,8 @@ XIRR computations. X-Ray is lazy-loaded on tab click only (not in either phase).
 
 ## Version
 
-Current: **v0.7.2** — Responsive mobile/tablet layout (media queries in styles.css;
+Current: **v0.7.3** — `backup.sh` keeps a dated 7-day history in Nextcloud
+(`portfolio-YYYY-MM-DD.db` + `-latest`, WebDAV-pruned). Plus v0.7.2: Responsive mobile/tablet layout (media queries in styles.css;
 none existed before) + hover/tap-to-reveal exact amounts (`amt()` helper) in
 Equities/MF summary cards + holdings. Plus v0.7.1: Analytics result caching (in-process, fingerprint-keyed:
 holdings/curve/summary/xirr/realized/data-quality/networth; `cached_call` +

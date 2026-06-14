@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.7.3] — 2026-06-14
+
+### Changed
+- **Nextcloud backup keeps a dated 7-day history** — `backup.sh` now uploads a dated copy (`portfolio-YYYY-MM-DD.db`) each run *in addition* to the `portfolio-latest.db` pointer, and prunes dated copies older than `KEEP` (default 7) days via WebDAV `DELETE` (sweeps a week of dates so gaps from days the Pi was off are cleaned up too). Previously only the single overwritten `-latest` file lived off-device, so there was no version history in Nextcloud.
+
+---
+
 ## [0.7.2] — 2026-06-14
 
 ### Added

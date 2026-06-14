@@ -56,11 +56,13 @@ if [ -n "$NEXTCLOUD_DIR" ] && [ -d "$NEXTCLOUD_DIR" ]; then
   echo "[$(date '+%F %T')] copied to folder: $NEXTCLOUD_DIR/portfolio-latest.db"
 fi
 
-# Optional: upload to Nextcloud via WebDAV so it registers in Nextcloud and
-# syncs to any device running the Nextcloud client.
+# Optional: upload to Nextcloud via WebDAV — keeps a DATED rolling history (last
+# $KEEP days) plus a convenient "latest" pointer, so it's both off-device and
+# version-recoverable, and syncs to any device running the Nextcloud client.
 if [ -n "$NEXTCLOUD_URL" ] && [ -n "$NEXTCLOUD_USER" ] && [ -n "$NEXTCLOUD_APP_PASSWORD" ]; then
   base="${NEXTCLOUD_URL%/}/remote.php/dav/files/$NEXTCLOUD_USER"
   cred="$NEXTCLOUD_USER:$NEXTCLOUD_APP_PASSWORD"
+  remote="$base/$NEXTCLOUD_REMOTE_DIR"
   # Create the remote directory tree (MKCOL per level; already-exists is fine).
   path=""
   IFS='/' read -ra _parts <<< "$NEXTCLOUD_REMOTE_DIR"
@@ -69,12 +71,26 @@ if [ -n "$NEXTCLOUD_URL" ] && [ -n "$NEXTCLOUD_USER" ] && [ -n "$NEXTCLOUD_APP_P
     path="${path:+$path/}$p"
     curl -fsS -u "$cred" -X MKCOL "$base/$path" >/dev/null 2>&1 || true
   done
-  code="$(curl -s -o /dev/null -w '%{http_code}' -u "$cred" -T "$dest" "$base/$NEXTCLOUD_REMOTE_DIR/portfolio-latest.db" || echo 000)"
-  if [ "$code" = "201" ] || [ "$code" = "204" ]; then
-    echo "[$(date '+%F %T')] uploaded to Nextcloud: $NEXTCLOUD_REMOTE_DIR/portfolio-latest.db (HTTP $code)"
-  else
-    echo "[$(date '+%F %T')] WARN: Nextcloud upload failed (HTTP $code)" >&2
-  fi
+  # Upload today's dated copy + overwrite the "latest" pointer.
+  daystamp="$(date +%F)"
+  for fname in "portfolio-$daystamp.db" "portfolio-latest.db"; do
+    code="$(curl -s -o /dev/null -w '%{http_code}' -u "$cred" -T "$dest" "$remote/$fname" || echo 000)"
+    if [ "$code" = "201" ] || [ "$code" = "204" ]; then
+      echo "[$(date '+%F %T')] uploaded to Nextcloud: $NEXTCLOUD_REMOTE_DIR/$fname (HTTP $code)"
+    else
+      echo "[$(date '+%F %T')] WARN: Nextcloud upload of $fname failed (HTTP $code)" >&2
+    fi
+  done
+  # Rolling retention: delete dated copies older than $KEEP days. Sweep a week's
+  # worth of dates so stragglers from days the Pi was off still get cleaned up.
+  # 404s (already gone / never existed) are ignored. Needs GNU date (-d), present
+  # on the Pi (Linux); skipped gracefully if unavailable.
+  for d in $(seq "$KEEP" "$((KEEP + 6))"); do
+    old="$(date -d "$d days ago" +%F 2>/dev/null || true)"
+    [ -z "$old" ] && continue
+    curl -s -o /dev/null -u "$cred" -X DELETE "$remote/portfolio-$old.db" >/dev/null 2>&1 || true
+  done
+  echo "[$(date '+%F %T')] Nextcloud: keeping dated backups for the last $KEEP days"
 fi
 
 # Retention: keep the newest $KEEP local snapshots, delete the rest.
