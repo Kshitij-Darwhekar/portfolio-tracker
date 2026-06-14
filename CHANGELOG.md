@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.7.0] — 2026-06-14
+
+### Added
+- **Privacy mode** — an eye-icon toggle in the header hides all monetary amounts and portfolio size across every tab (Equities, MF, FI, EPF, Global, Bonds, X-Ray, Net Worth) so the dashboard can be screenshotted/demoed without revealing wealth (like Zerodha Kite's privacy toggle).
+  - ₹ and $ amounts plus quantities render as `••••`; **percentages stay visible** (XIRR, % returns, allocation %) so the performance story still shows.
+  - All charts are blurred and their hover tooltips disabled (a `<canvas>` can't show dot-masked text).
+  - State persists in `localStorage` and is applied before first paint.
+  - Implemented via privacy-aware formatters (`fmtINR` / `fmtQty` / new `fmtUSD`); Global-tab USD values and the FD/EPF TDS warning were routed through them. Charts are blurred via a `.chart-blur` class on the canvas, and chart re-creation is skipped during a toggle (avoids a Chart.js resize-loop hang); the toggle reuses cached data and skips slow Phase 2 calls so it's fast.
+- **`K` (thousands) number formatting** — `fmtINR` now shortens ₹1,000–99,999 to `K` (e.g. ₹70,419 → ₹70.4K), consistent with the existing L/Cr formatting.
+
+---
+
 ## [0.6.2] — 2026-06-14
 
 ### Security

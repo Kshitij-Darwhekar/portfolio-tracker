@@ -182,10 +182,13 @@ XIRR computations. X-Ray is lazy-loaded on tab click only (not in either phase).
 
 ## Version
 
-Current: **v0.6.2** — Optional HTTP Basic Auth (`APP_PASSWORD`), debug endpoints
-gated behind `ENABLE_DEBUG_ENDPOINTS`, env-driven compose (`.env` / `DATA_DIR`),
-`scripts/` (backup, refresh-prices, update), Nextcloud WebDAV off-device backup,
-and non-root container (`appuser`, uid 1000). See CHANGELOG.md for full history.
+Current: **v0.7.0** — Privacy mode (eye-icon toggle hides all amounts/portfolio
+size, charts blurred, percentages kept; `body.privacy-on` + maskable `fmtINR`/
+`fmtQty`/`fmtUSD`). Plus from v0.6.x: optional HTTP Basic Auth (`APP_PASSWORD`),
+debug endpoints gated behind `ENABLE_DEBUG_ENDPOINTS`, env-driven compose
+(`.env` / `DATA_DIR`), `scripts/` (backup, refresh-prices, update), Nextcloud
+WebDAV off-device backup, non-root container (`appuser`, uid 1000).
+See CHANGELOG.md for full history.
 
 **Config**: all via env (see `.env.example`) — `DATA_DIR` (DB host path),
 `APP_USERNAME`/`APP_PASSWORD` (Basic Auth, off when password empty),

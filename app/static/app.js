@@ -1,14 +1,36 @@
+// Privacy mode: when on, monetary amounts and quantities render as dots so the
+// dashboard can be shown/screenshotted without revealing wealth. Percentages
+// stay visible (the performance story). Persisted in localStorage; charts are
+// blurred via CSS (a canvas can't show dots).
+let privacyMode = localStorage.getItem("privacy-mode") === "on";
+const MASK = "••••";
+// When true, chart (re)creation is skipped — used during a privacy toggle so we
+// re-render text without destroying/recreating charts (recreation can trigger a
+// Chart.js resize loop that hangs the page). Existing charts stay, blurred by CSS.
+let chartsPaused = false;
+// When true, loaders reuse already-fetched data instead of re-hitting the network
+// (used by the privacy toggle so re-rendering is instant).
+let _useCache = false;
+
 // Indian number formatting: use L/Cr for large numbers for readability
 const fmtINR = (n) => {
   if (n == null || isNaN(n)) return "—";
+  if (privacyMode) return "₹" + MASK;
   const abs = Math.abs(n);
   const sign = n < 0 ? "-" : "";
   if (abs >= 1e7) return sign + "₹" + (abs / 1e7).toFixed(2) + "Cr";
   if (abs >= 1e5) return sign + "₹" + (abs / 1e5).toFixed(2) + "L";
+  if (abs >= 1e3) return sign + "₹" + (abs / 1e3).toFixed(1) + "K";
   return (n < 0 ? "-₹" : "₹") + abs.toLocaleString("en-IN", { maximumFractionDigits: 2 });
 };
+// USD formatter for the Global tab (amounts bypass fmtINR). Masks in privacy mode.
+const fmtUSD = (n, dp = 2) => {
+  if (n == null || isNaN(n)) return "—";
+  if (privacyMode) return "$" + MASK;
+  return "$" + Number(n).toFixed(dp);
+};
 const fmtPct = (n) => (n == null || isNaN(n) ? "—" : (n * 100).toFixed(2) + "%");
-const fmtQty = (n) => (n == null ? "—" : Number(n).toLocaleString("en-IN", { maximumFractionDigits: 4 }));
+const fmtQty = (n) => (n == null ? "—" : privacyMode ? MASK : Number(n).toLocaleString("en-IN", { maximumFractionDigits: 4 }));
 const cls = (n) => (n == null ? "" : n > 0 ? "pos" : n < 0 ? "neg" : "");
 
 // Global — used in multiple places including error handlers
@@ -38,7 +60,7 @@ const ACCT_LABELS = { equity: "Equities", mf: "Mutual Funds", fi: "Fixed Income"
 function renderNwDonut(nw) {
   const c = nw.current;
   const ctx = document.getElementById("nw-donut").getContext("2d");
-  if (nwDonutChart) nwDonutChart.destroy();
+  if (!chartsPaused && nwDonutChart) nwDonutChart.destroy();
 
   let labels, values, colors;
   if (nwView === "asset_class") {
@@ -52,7 +74,7 @@ function renderNwDonut(nw) {
     colors = Object.keys(ACCT_LABELS).filter(k => c[k] > 0).map(k => ACCT_COLORS[k]);
   }
 
-  nwDonutChart = new Chart(ctx, {
+  nwDonutChart = chartsPaused ? nwDonutChart : new Chart(ctx, {
     type: "doughnut",
     data: {
       labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: 0 }],
@@ -233,7 +255,7 @@ function _renderNetWorth(nw) {
 
     // Projection chart with milestones
     const projCtx = document.getElementById("nw-projection-chart").getContext("2d");
-    if (nwProjectionChart) nwProjectionChart.destroy();
+    if (!chartsPaused && nwProjectionChart) nwProjectionChart.destroy();
 
     const histLabels = nw.history.map(h => h.month);
     const histVals   = nw.history.map(h => h.total);
@@ -279,7 +301,7 @@ function _renderNetWorth(nw) {
       return found ? found.y : null;
     });
 
-    nwProjectionChart = new Chart(projCtx, {
+    nwProjectionChart = chartsPaused ? nwProjectionChart : new Chart(projCtx, {
       type: "line",
       data: {
         labels: allLabels,
@@ -342,8 +364,8 @@ async function loadEpfSection() {
     // Monthly contributions chart
     const months = s.monthly_contributions;
     const mcCtx = document.getElementById("epf-monthly-chart").getContext("2d");
-    if (epfMonthlyChart) epfMonthlyChart.destroy();
-    epfMonthlyChart = new Chart(mcCtx, {
+    if (!chartsPaused && epfMonthlyChart) epfMonthlyChart.destroy();
+    epfMonthlyChart = chartsPaused ? epfMonthlyChart : new Chart(mcCtx, {
       type: "bar",
       data: {
         labels: months.map(m => m.month.slice(0, 7)),
@@ -366,8 +388,8 @@ async function loadEpfSection() {
     let balRunning = 0;
     const balData = months.map(m => { balRunning += m.employee + m.employer; return balRunning; });
     const bgCtx = document.getElementById("epf-balance-chart").getContext("2d");
-    if (epfBalanceChart) epfBalanceChart.destroy();
-    epfBalanceChart = new Chart(bgCtx, {
+    if (!chartsPaused && epfBalanceChart) epfBalanceChart.destroy();
+    epfBalanceChart = chartsPaused ? epfBalanceChart : new Chart(bgCtx, {
       type: "line",
       data: {
         labels: months.map(m => m.month.slice(0, 7)),
@@ -605,9 +627,9 @@ async function loadGlobalSection() {
     const card = (title, val, sub) =>
       `<div class="card"><h3>${title}</h3><div class="value">${val}</div>${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
     sc.innerHTML =
-      card("Invested (USD)",  `$${(summary.invested_usd||0).toFixed(2)}`, `₹${fmtINR(summary.invested_inr||0).replace('₹','')}`) +
-      card("Current (USD)",   `$${(summary.total_usd||0).toFixed(2)}`,    `₹${fmtINR(summary.total_inr||0).replace('₹','')}`) +
-      card("P&L (USD)", `$${((summary.total_usd||0)-(summary.invested_usd||0)).toFixed(2)}`, null);
+      card("Invested (USD)",  fmtUSD(summary.invested_usd||0), `₹${fmtINR(summary.invested_inr||0).replace('₹','')}`) +
+      card("Current (USD)",   fmtUSD(summary.total_usd||0),    `₹${fmtINR(summary.total_inr||0).replace('₹','')}`) +
+      card("P&L (USD)", fmtUSD((summary.total_usd||0)-(summary.invested_usd||0)), null);
 
     // Holdings table
     const htbody = document.querySelector("#global-holdings-table tbody");
@@ -618,12 +640,12 @@ async function loadGlobalSection() {
         : `<span class="fi-badge active">Active</span>`;
       htbody.innerHTML += `<tr>
         <td><strong>${h.symbol}</strong><br><span class="muted" style="font-size:11px">${h.name||''}</span></td>
-        <td class="num">${h.quantity || "—"}</td>
-        <td class="num">${h.avg_cost_usd ? `$${h.avg_cost_usd.toFixed(4)}` : "—"}</td>
-        <td class="num">${h.current_price_usd ? `$${h.current_price_usd.toFixed(2)}` : "—"}</td>
-        <td class="num">${h.invested_usd ? `$${h.invested_usd.toFixed(2)}` : "—"}</td>
-        <td class="num">${h.current_value_usd != null ? `$${h.current_value_usd.toFixed(2)}` : "—"}</td>
-        <td class="num ${(h.unrealized_pnl_usd||0) >= 0 ? 'pos' : 'neg'}">${h.unrealized_pnl_usd != null ? `$${h.unrealized_pnl_usd.toFixed(2)}` : h.realized_pnl_usd ? `$${h.realized_pnl_usd.toFixed(2)}` : "—"}</td>
+        <td class="num">${h.quantity ? fmtQty(h.quantity) : "—"}</td>
+        <td class="num">${h.avg_cost_usd ? fmtUSD(h.avg_cost_usd, 4) : "—"}</td>
+        <td class="num">${h.current_price_usd ? fmtUSD(h.current_price_usd) : "—"}</td>
+        <td class="num">${h.invested_usd ? fmtUSD(h.invested_usd) : "—"}</td>
+        <td class="num">${h.current_value_usd != null ? fmtUSD(h.current_value_usd) : "—"}</td>
+        <td class="num ${(h.unrealized_pnl_usd||0) >= 0 ? 'pos' : 'neg'}">${h.unrealized_pnl_usd != null ? fmtUSD(h.unrealized_pnl_usd) : h.realized_pnl_usd ? fmtUSD(h.realized_pnl_usd) : "—"}</td>
         <td class="num ${(h.unrealized_pnl_inr||0) >= 0 ? 'pos' : 'neg'}">${h.unrealized_pnl_inr != null ? fmtINR(h.unrealized_pnl_inr) : "—"}</td>
         <td class="num ${(h.pct_return||0) >= 0 ? 'pos' : 'neg'}">${h.pct_return != null ? h.pct_return.toFixed(2)+'%' : "—"}</td>
         <td>${badge}</td>
@@ -641,10 +663,10 @@ async function loadGlobalSection() {
         <td>${t.trade_date}</td>
         <td><strong>${t.symbol}</strong></td>
         <td class="${t.trade_type==='buy'?'pos':'neg'}">${t.trade_type}</td>
-        <td class="num">${t.quantity.toFixed(6)}</td>
-        <td class="num">$${t.price_usd.toFixed(4)}</td>
-        <td class="num">$${t.amount_usd.toFixed(4)}</td>
-        <td class="num">${t.fees_usd.toFixed(2)}</td>
+        <td class="num">${privacyMode ? MASK : t.quantity.toFixed(6)}</td>
+        <td class="num">${privacyMode ? MASK : "$" + t.price_usd.toFixed(4)}</td>
+        <td class="num">${privacyMode ? MASK : "$" + t.amount_usd.toFixed(4)}</td>
+        <td class="num">${privacyMode ? MASK : t.fees_usd.toFixed(2)}</td>
         <td class="num">${t.exchange_rate ? t.exchange_rate.toFixed(2) : '—'}</td>
         <td class="num">${t.amount_inr ? fmtINR(t.amount_inr) : '—'}</td>
         <td><button class="delete-btn global-del-btn" data-id="${t.id}">delete</button></td>
@@ -693,7 +715,7 @@ async function loadGlobalAnalytics() {
       sub.textContent = `All series rebased to 100 on ${curveData.base_date} · USD`;
 
     const ctx = document.getElementById("global-curve-chart").getContext("2d");
-    if (globalCurveChart) globalCurveChart.destroy();
+    if (!chartsPaused && globalCurveChart) globalCurveChart.destroy();
     const COLORS = { "Portfolio": "#e6edf3", "S&P 500": "#58a6ff", "NASDAQ 100": "#3fb950" };
     const datasets = Object.entries(curveData.series || {}).map(([name, vals]) => ({
       label: name,
@@ -703,7 +725,7 @@ async function loadGlobalAnalytics() {
       borderWidth: name === "Portfolio" ? 2 : 1.5,
       pointRadius: 0, spanGaps: true, tension: 0.1,
     }));
-    globalCurveChart = new Chart(ctx, {
+    globalCurveChart = chartsPaused ? globalCurveChart : new Chart(ctx, {
       type: "line",
       data: { labels: curveData.dates, datasets },
       options: {
@@ -752,7 +774,7 @@ async function loadGlobalAnalytics() {
         <td>${r.buy_date}</td><td>${r.sell_date}</td>
         <td class="num">${r.held_months}mo</td>
         <td class="${typeClass}">${r.type}</td>
-        <td class="num ${cls(r.pnl_usd)}">$${r.pnl_usd.toFixed(4)}</td>
+        <td class="num ${cls(r.pnl_usd)}">${fmtUSD(r.pnl_usd, 4)}</td>
         <td class="num">${fmtINR(r.cost_inr)}</td>
         <td class="num">${fmtINR(r.proceeds_inr)}</td>
         <td class="num ${cls(r.pnl_inr)}">${fmtINR(r.pnl_inr)}</td>
@@ -1071,8 +1093,8 @@ async function loadFiCharts() {
       `vs ${gc.savings_rate}% savings · ${gc.std_fd_rate}% std FD · ${gc.inflation_rate}% inflation`;
 
     const gcCtx = document.getElementById("fi-growth-chart").getContext("2d");
-    if (fiGrowthChart) fiGrowthChart.destroy();
-    fiGrowthChart = new Chart(gcCtx, {
+    if (!chartsPaused && fiGrowthChart) fiGrowthChart.destroy();
+    fiGrowthChart = chartsPaused ? fiGrowthChart : new Chart(gcCtx, {
       type: "line",
       data: {
         labels: gc.labels,
@@ -1099,8 +1121,8 @@ async function loadFiCharts() {
 
     // 2. Cashflow Forecast bar chart
     const cfCtx = document.getElementById("fi-cashflow-chart").getContext("2d");
-    if (fiCashflowChart) fiCashflowChart.destroy();
-    fiCashflowChart = new Chart(cfCtx, {
+    if (!chartsPaused && fiCashflowChart) fiCashflowChart.destroy();
+    fiCashflowChart = chartsPaused ? fiCashflowChart : new Chart(cfCtx, {
       type: "bar",
       data: {
         labels: d.cashflow_forecast.labels,
@@ -1120,8 +1142,8 @@ async function loadFiCharts() {
 
     // 3. FY Interest income bar chart
     const fyCtx = document.getElementById("fi-fy-chart").getContext("2d");
-    if (fiFyChart) fiFyChart.destroy();
-    fiFyChart = new Chart(fyCtx, {
+    if (!chartsPaused && fiFyChart) fiFyChart.destroy();
+    fiFyChart = chartsPaused ? fiFyChart : new Chart(fyCtx, {
       type: "bar",
       data: {
         labels: d.fy_interest.map(r => r.fy),
@@ -1172,7 +1194,7 @@ async function loadFiHoldings() {
     // TDS warning
     if (summary.tds_warnings && summary.tds_warnings.length) {
       const warn = summary.tds_warnings.map(w =>
-        `<strong>${w.bank}</strong>: ₹${w.fy_interest.toFixed(0)} FY interest → est. TDS ₹${w.tds.toFixed(0)}`
+        `<strong>${w.bank}</strong>: ${fmtINR(w.fy_interest)} FY interest → est. TDS ${fmtINR(w.tds)}`
       ).join("; ");
       sc.innerHTML += `<div class="card" style="border-color:rgba(210,153,34,.5);grid-column:1/-1"><h3>⚠ TDS Warning</h3><div class="sub">${warn}</div></div>`;
     }
@@ -1561,7 +1583,7 @@ const _allocCharts  = {};
 
 function _destroyAllocCharts() {
   for (const k of Object.keys(_allocCharts)) {
-    try { _allocCharts[k]?.destroy(); } catch (_) {}
+    try { if (!chartsPaused) _allocCharts[k]?.destroy(); } catch (_) {}
     delete _allocCharts[k];
   }
 }
@@ -1570,7 +1592,7 @@ function _destroyAllocCharts() {
 function _makeDonut(canvasId, items, colors, labelFn, onClickFn) {
   const canvas = document.getElementById(canvasId);
   if (!canvas || !items.length) return;
-  const chart = new Chart(canvas, {
+  const chart = chartsPaused ? _allocCharts[canvasId] : new Chart(canvas, {
     type: "doughnut",
     data: {
       labels: items.map(labelFn),
@@ -1591,6 +1613,7 @@ function _makeDonut(canvasId, items, colors, labelFn, onClickFn) {
     }
   });
   _allocCharts[canvasId] = chart;
+  if (typeof applyChartBlur === "function") applyChartBlur();  // blur wrapper if privacy on
 }
 
 // Holdings table rows (shared between cap drill and sector/mf details)
@@ -2182,7 +2205,7 @@ document.querySelectorAll("#holdings-table th.sortable").forEach((th) => {
 document.getElementById("hide-closed").addEventListener("change", renderHoldings);
 
 async function loadHoldings() {
-  holdingsData = await api(`/api/holdings${segParam()}`);
+  holdingsData = _useCache && holdingsData.length ? holdingsData : await api(`/api/holdings${segParam()}`);
   renderHoldings();
 }
 
@@ -2222,7 +2245,7 @@ async function loadEquityCurve() {
       `A value of 200 means 2× what that investment would be worth today.`;
   }
   const ctx = document.getElementById("equity-chart").getContext("2d");
-  if (chart) chart.destroy();
+  if (!chartsPaused && chart) chart.destroy();
 
   const colors = ["#58a6ff", "#3fb950", "#d29922", "#f778ba", "#a371f7", "#f85149"];
   const datasets = Object.entries(data.series || {}).map(([name, vals], i) => ({
@@ -2236,7 +2259,7 @@ async function loadEquityCurve() {
     tension: 0.1,
   }));
 
-  chart = new Chart(ctx, {
+  chart = chartsPaused ? chart : new Chart(ctx, {
     type: "line",
     data: { labels: data.dates, datasets },
     options: {
@@ -2533,6 +2556,31 @@ document.getElementById("btn-refresh").addEventListener("click", async () => {
   }
 });
 
+// --- privacy mode toggle ---
+// Blur the chart canvases themselves (only the graph, not surrounding text like
+// the Net Worth headline). Safe because we only ever blur AFTER charts are drawn
+// and never recreate a chart while it's blurred (see unblurCharts + chartsPaused).
+function applyChartBlur() {
+  document.querySelectorAll("canvas").forEach((c) => c.classList.toggle("chart-blur", privacyMode));
+}
+function unblurCharts() {
+  document.querySelectorAll("canvas").forEach((c) => c.classList.remove("chart-blur"));
+}
+// Reflects current state on <body> (icon) + blurs chart wrappers + button title.
+function applyPrivacyUI() {
+  document.body.classList.toggle("privacy-on", privacyMode);
+  const btn = document.getElementById("btn-privacy");
+  if (btn) btn.title = privacyMode ? "Privacy mode ON — click to show amounts" : "Privacy mode — hide amounts";
+  applyChartBlur();
+}
+applyPrivacyUI();  // apply saved state before first render below
+document.getElementById("btn-privacy")?.addEventListener("click", () => {
+  privacyMode = !privacyMode;
+  localStorage.setItem("privacy-mode", privacyMode ? "on" : "off");
+  applyPrivacyUI();        // instant: icon + blur existing chart wrappers
+  refreshAll(false, true); // re-render text only; skip chart recreation (no crash)
+});
+
 // --- corporate actions ---
 
 function fmtCA(ca) {
@@ -2722,7 +2770,12 @@ document.querySelector("#alias-table tbody").addEventListener("click", async (e)
 function showLoading() { document.getElementById("loading-bar")?.classList.add("active"); }
 function hideLoading() { document.getElementById("loading-bar")?.classList.remove("active"); }
 
-async function refreshAll(tabSwitch = false) {
+async function refreshAll(tabSwitch = false, fast = false) {
+  // `fast` (privacy toggle): re-render text only — keep charts (chartsPaused),
+  // reuse cached data (_useCache), and skip the slow Phase 2 network calls.
+  chartsPaused = fast;
+  _useCache = fast;
+  if (!fast) unblurCharts();   // charts will be (re)created — clear blur so Chart.js can't resize-loop
   const realizedPeriod = document.getElementById("realized-period-select").value;
   const xirrPeriod    = document.getElementById("xirr-period-select").value;
 
@@ -2747,6 +2800,15 @@ async function refreshAll(tabSwitch = false) {
     hideLoading();
   }
 
+  // Privacy toggle: re-mask Net Worth from cached data and stop — skip the slow
+  // Phase 2 (yfinance/global, equity curve, XIRR recompute). Charts stay as-is,
+  // blurred. Other tabs (EPF/Global/Bonds) re-mask when next selected.
+  if (fast) {
+    if (nwData) _renderNetWorth(nwData);
+    applyChartBlur();
+    return;
+  }
+
   // Phase 2 — slow (equity curve + full XIRR + net worth): fire and forget
   Promise.all([
     loadEquityCurve(),
@@ -2756,7 +2818,7 @@ async function refreshAll(tabSwitch = false) {
     loadGlobalSection(),
     loadGlobalAnalytics(),   // XIRR + curve + tax (involves yfinance, slow)
     loadBondsSection(),
-  ]).catch(console.error);
+  ]).then(applyChartBlur).catch(console.error);  // re-blur wrappers of recreated charts
 }
 
 // Keyboard shortcuts

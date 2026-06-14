@@ -36,6 +36,27 @@
   100% { left: 100%; }
 }
 
+/* Privacy mode: blur each chart's WRAPPER (not the <canvas> itself — filtering
+   a canvas that Chart.js resizes triggers an infinite resize loop). A filter on
+   the parent doesn't change the box size Chart.js measures, so it's safe.
+   Amounts are masked to dots in JS; percentages stay visible. */
+.chart-blur { filter: blur(9px); pointer-events: none; }
+
+/* Eye-icon button — matches header buttons; swaps eye / eye-off by state */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 8px;
+  line-height: 0;
+  color: var(--text);
+}
+.icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+.icon-btn .icon-eye-off { display: none; }
+body.privacy-on .icon-btn { border-color: var(--accent); color: var(--accent); }
+body.privacy-on .icon-btn .icon-eye { display: none; }
+body.privacy-on .icon-btn .icon-eye-off { display: inline; }
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
