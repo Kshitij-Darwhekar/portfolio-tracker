@@ -197,7 +197,9 @@ prices.py) is now only a **fallback** for stocks outside the top 500.
 
 When in doubt: "does this add a capability the user didn't have?" → MINOR; "does it fix/improve something that existed?" → PATCH.
 
-Current: **v0.7.4** — Large/Mid/Small-cap classification now uses the official
+Current: **v0.8.0** — X-Ray "Insights" panel: data-driven allocation observations
+(`_xrayInsights` in app.js) + auto-rotating cited educational tips (`CURATED_TIPS`,
+12s timer), framed as education-not-advice. Plus v0.7.4: Large/Mid/Small-cap classification now uses the official
 NSE/AMFI ranking (NIFTY 100/Midcap 150/Smallcap 250 via `app/cap_classification.py`,
 matched by ISIN→symbol, disk-cached) instead of live yfinance market cap; fixes
 misclassifications. Plus v0.7.3: `backup.sh` keeps a dated 7-day history in Nextcloud

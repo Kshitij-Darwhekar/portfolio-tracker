@@ -238,6 +238,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 | Version | Date | Highlights |
 |---|---|---|
+| **0.8.0** | 2026-06-14 | X-Ray Insights panel — data-driven allocation observations + auto-rotating cited educational tips (education, not advice) |
 | **0.7.4** | 2026-06-14 | Cap classification (Large/Mid/Small) now uses the official NSE/AMFI ranking (NIFTY 100/Midcap 150/Smallcap 250) instead of live market cap — fixes misclassifications |
 | **0.7.3** | 2026-06-14 | Nextcloud backup keeps a dated 7-day history (`portfolio-YYYY-MM-DD.db`) + `-latest` pointer, with WebDAV pruning |
 | **0.7.2** | 2026-06-14 | Responsive mobile/tablet layout; hover/tap to reveal exact amounts (₹4.32L → ₹4,32,123.45) in Equities/MF cards + holdings |

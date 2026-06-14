@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.8.0] — 2026-06-14
+
+### Added
+- **X-Ray "Insights" panel** — replaces the single one-line smart insight with a small panel of:
+  - **Data-driven observations** computed from your live allocation each load — sector concentration, small-cap / large-cap tilt, **top-3 single-stock concentration**, MF style tilt — each with a cited source. These update as the portfolio changes.
+  - **Rotating educational tips** (Markowitz / Peter Lynch / John Bogle / SEBI-AMFI) that **auto-cycle every 12 s** with a fade while the X-Ray tab is open (the timer self-stops on leaving the tab); easy to extend via the `CURATED_TIPS` list.
+  - Framed as **education, not advice** (explicit footer). Frontend-only — reuses the existing `/api/allocation` data, no backend change.
+
+---
+
 ## [0.7.4] — 2026-06-14
 
 ### Changed

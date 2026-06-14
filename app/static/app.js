@@ -1718,23 +1718,97 @@ function _toggleRowDetail(items, colors, detailPrefix, rowAttr, idx, labelFn) {
   }
 }
 
-// One-line smart insight from the allocation data
-function _xrayInsight(eq, mf) {
+// ---- X-Ray insights: data-driven observations + rotating curated tips ----
+// Educational, not advice. Data-driven cards recompute from the live allocation
+// each load; curated tips (with sources) are rotated for variety.
+
+const CURATED_TIPS = [
+  { text: "Large / Mid / Small cap = the top 100 / next 150 / next 250 listed companies by market cap.", source: "SEBI / AMFI categorisation" },
+  { text: "Diversification can lower risk without lowering expected return — often called the only 'free lunch' in investing.", source: "Modern Portfolio Theory, Harry Markowitz (1952)" },
+  { text: "Beyond ~20–30 stocks, extra holdings add little diversification — Peter Lynch called over-diversifying 'diworsification'.", source: "Peter Lynch, One Up on Wall Street" },
+  { text: "Time in the market usually beats timing the market — steady investing tends to win over guessing tops and bottoms.", source: "John Bogle / Bogleheads" },
+  { text: "Small caps can outrun large caps in bull runs but fall harder in downturns — higher risk, higher potential reward.", source: "SEBI risk classification" },
+  { text: "Costs compound too: lower expense ratios and fewer trades leave more of the return with you.", source: "John Bogle, Common Sense on Mutual Funds" },
+  { text: "A stock's cap category and sector aren't fixed — they shift as the company and market move, so review periodically.", source: "general" },
+  { text: "Rupee-cost averaging (SIPs) spreads your entry price over time and reduces the risk of buying everything at a peak.", source: "general" },
+  { text: "Past performance doesn't guarantee future results — a strong recent return isn't a promise.", source: "SEBI-mandated disclaimer" },
+  { text: "Rebalancing to target weights trims winners and tops up laggards — a disciplined 'buy low, sell high'.", source: "Bogleheads" },
+];
+
+// % of equity held in the top N holdings (holdings carry pct of the equity total).
+function _topHoldingsConcentration(eq, n = 3) {
+  const all = (eq.by_market_cap || []).flatMap(g => g.holdings || []);
+  all.sort((a, b) => (b.value || 0) - (a.value || 0));
+  const topN = all.slice(0, n).reduce((s, h) => s + (h.pct || 0), 0);
+  return { topN: Math.round(topN), top1: all.length ? Math.round(all[0].pct || 0) : 0 };
+}
+
+// Observations about THIS portfolio (recomputed every load). Returns up to 4.
+function _xrayInsights(eq, mf) {
+  const out = [];
   if (eq.unclassified_count > 0) {
     const total = eq.by_market_cap.reduce((s, r) => s + r.holdings.length, 0) || 1;
     if (eq.unclassified_count / total >= 0.3)
-      return `${eq.unclassified_count} stocks have no market cap data. Click <em>Refresh market data</em> to classify them.`;
+      out.push({ kind: "warn", text: `${eq.unclassified_count} stocks have no market-cap data — click <em>Refresh market data</em> to classify them.`, source: "" });
   }
-  const top = eq.by_sector[0];
-  if (top && top.pct > 35)
-    return `Portfolio is concentrated in <strong>${top.sector}</strong> at ${top.pct}% — higher sector-specific risk.`;
-  const small = eq.by_market_cap.find(r => r.category === "small");
-  if (small && small.pct > 35)
-    return `High small cap allocation at <strong>${small.pct}%</strong> — expect higher volatility.`;
-  const large = eq.by_market_cap.find(r => r.category === "large");
-  if (large && large.pct > 0 && eq.by_sector.length >= 3)
-    return `Diversified across ${eq.by_sector.length} sectors with <strong>${large.pct}%</strong> large cap stability.`;
-  return null;
+  const topSector = (eq.by_sector || [])[0];
+  if (topSector && topSector.pct > 30)
+    out.push({ kind: "warn", text: `Concentrated in <strong>${topSector.sector}</strong> at ${topSector.pct}%. Spreading across sectors reduces company- and sector-specific risk.`, source: "Modern Portfolio Theory, Harry Markowitz (1952)" });
+  const conc = _topHoldingsConcentration(eq, 3);
+  if (conc.top1 > 15 || conc.topN > 40)
+    out.push({ kind: "warn", text: `Your top 3 holdings are <strong>${conc.topN}%</strong> of equity — concentrated single-stock risk if any one stumbles.`, source: "general diversification principle" });
+  const small = (eq.by_market_cap || []).find(r => r.category === "small");
+  if (small && small.pct > 30)
+    out.push({ kind: "warn", text: `Small caps are <strong>${small.pct}%</strong> of equity — historically higher volatility than large caps.`, source: "SEBI risk classification; NIFTY Smallcap 250 vs NIFTY 100" });
+  const large = (eq.by_market_cap || []).find(r => r.category === "large");
+  if (large && large.pct > 60)
+    out.push({ kind: "info", text: `Large-cap heavy at <strong>${large.pct}%</strong> — typically steadier but slower-growing. Large cap = the top 100 companies by market cap.`, source: "SEBI / AMFI categorisation" });
+  const topCat = (mf.by_category || [])[0];
+  if (topCat && topCat.pct > 50)
+    out.push({ kind: "info", text: `Mutual funds are tilted to <strong>${topCat.label || topCat.category}</strong> at ${topCat.pct}% — check it matches your intended style mix.`, source: "" });
+  if (out.length === 0 && large && large.pct > 0 && (eq.by_sector || []).length >= 3)
+    out.push({ kind: "good", text: `Nicely spread across ${eq.by_sector.length} sectors with a <strong>${large.pct}%</strong> large-cap core.`, source: "" });
+  return out.slice(0, 4);
+}
+
+// Build the Insights panel: data-driven cards (static) + a curated-tip block that
+// auto-rotates on a timer while the X-Ray is open.
+let _insightsTimer = null;
+const _INSIGHT_ICONS = { warn: "⚠️", info: "📊", good: "✅", tip: "💡" };
+
+function _insightCard(i, isTip) {
+  return `<div class="xray-insight-card ${isTip ? "tip" : i.kind}">
+       <span class="xray-insight-icon">${isTip ? "💡" : (_INSIGHT_ICONS[i.kind] || "💡")}</span>
+       <span>${i.text}${i.source ? `<span class="xray-insight-src">— ${i.source}</span>` : ""}</span>
+     </div>`;
+}
+function _renderTipsHTML() {
+  return [...CURATED_TIPS].sort(() => Math.random() - 0.5).slice(0, 2).map(t => _insightCard(t, true)).join("");
+}
+function _renderInsightsPanel(eq, mf) {
+  const cards = _xrayInsights(eq, mf).map(i => _insightCard(i, false)).join("");
+  const tips = _renderTipsHTML();
+  if (!cards && !tips) return "";
+  return `<div class="xray-insights">
+      <div class="xray-block-title" style="margin-bottom:10px">Insights</div>
+      ${cards}
+      <div id="xray-tips" class="xray-tips">${tips}</div>
+      <div class="xray-insight-disclaimer">ℹ️ General educational information, not financial advice.</div>
+    </div>`;
+}
+// Refresh just the curated tips every 12s while on the X-Ray tab; self-stops on leave.
+function _rotateInsightTips() {
+  const el = document.getElementById("xray-tips");
+  if (!el || activeSegment !== "XRAY") {
+    if (_insightsTimer) { clearInterval(_insightsTimer); _insightsTimer = null; }
+    return;
+  }
+  el.style.opacity = "0";
+  setTimeout(() => { el.innerHTML = _renderTipsHTML(); el.style.opacity = "1"; }, 250);
+}
+function _startInsightRotation() {
+  if (_insightsTimer) clearInterval(_insightsTimer);
+  _insightsTimer = setInterval(_rotateInsightTips, 12000);
 }
 
 async function loadAllocation() {
@@ -1756,8 +1830,7 @@ async function loadAllocation() {
     const sectColors = eq.by_sector.map((_, i) => _SECT_PALETTE[i % _SECT_PALETTE.length]);
     const mfColors   = mf.by_category.map((_, i) => _SECT_PALETTE[i % _SECT_PALETTE.length]);
 
-    const insight = _xrayInsight(eq, mf);
-    let html = insight ? `<div class="xray-insight">💡 &nbsp;${insight}</div>` : "";
+    let html = _renderInsightsPanel(eq, mf);
 
     // ── Market Cap block ─────────────────────────────────────────────────
     if (eq.total_value > 0 && eq.by_market_cap.length > 0) {
@@ -1879,6 +1952,7 @@ async function loadAllocation() {
     }
 
     content.innerHTML = html;
+    _startInsightRotation();   // begin cycling the curated tips
 
     // ── Wire interactions ────────────────────────────────────────────────
 

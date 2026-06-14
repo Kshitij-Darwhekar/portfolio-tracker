@@ -371,9 +371,26 @@ dialog input, dialog select {
 .btn-secondary { background:transparent; border:1px solid var(--border); color:var(--muted); border-radius:4px; padding:4px 10px; font-size:12px; cursor:pointer; }
 .btn-secondary:hover { border-color:var(--accent); color:var(--accent); }
 
-/* Smart insight */
+/* Smart insight (legacy single-line) */
 .xray-insight { display:flex; align-items:flex-start; gap:8px; background:rgba(56,189,248,.07); border:1px solid rgba(56,189,248,.18); border-radius:8px; padding:11px 14px; font-size:12px; color:var(--muted); margin-bottom:16px; line-height:1.5; }
 .xray-insight strong { color:var(--fg); }
+
+/* Insights panel — data-driven cards + rotating curated tips */
+.xray-insights { margin-bottom:16px; }
+.xray-insight-card {
+  display:flex; align-items:flex-start; gap:8px;
+  background:rgba(56,189,248,.06); border:1px solid rgba(56,189,248,.16);
+  border-radius:8px; padding:10px 13px; margin-bottom:8px;
+  font-size:12px; color:var(--text); line-height:1.5;
+}
+.xray-insight-card.warn { background:rgba(210,153,34,.08); border-color:rgba(210,153,34,.25); }
+.xray-insight-card.good { background:rgba(63,185,80,.07);  border-color:rgba(63,185,80,.20); }
+.xray-insight-card.tip  { background:rgba(255,255,255,.03); border-color:var(--border); }
+.xray-tips { transition: opacity .25s ease; }
+.xray-insight-card strong { font-weight:600; }
+.xray-insight-icon { flex-shrink:0; }
+.xray-insight-src { color:var(--muted); font-size:11px; font-style:italic; margin-left:6px; }
+.xray-insight-disclaimer { color:var(--muted); font-size:10px; font-style:italic; margin-top:6px; }
 .xray-hint { font-size:11px; color:var(--muted); font-style:italic; }
 
 /* Block cards */
