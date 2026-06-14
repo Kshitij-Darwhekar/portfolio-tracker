@@ -12,8 +12,20 @@ let chartsPaused = false;
 // (used by the privacy toggle so re-rendering is instant).
 let _useCache = false;
 
-// Indian number formatting: use L/Cr for large numbers for readability
+// Indian number formatting: use L/Cr for large numbers; full value below ₹1L.
 const fmtINR = (n) => {
+  if (n == null || isNaN(n)) return "—";
+  if (privacyMode) return "₹" + MASK;
+  const abs = Math.abs(n);
+  const sign = n < 0 ? "-" : "";
+  if (abs >= 1e7) return sign + "₹" + (abs / 1e7).toFixed(2) + "Cr";
+  if (abs >= 1e5) return sign + "₹" + (abs / 1e5).toFixed(2) + "L";
+  return (n < 0 ? "-₹" : "₹") + abs.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+};
+// Compact ₹ that also shortens thousands to K (₹70.4K). Used ONLY in the Net Worth
+// summary (headline + by-account breakdown) for a clean glance; detailed segment
+// sections keep full values via fmtINR.
+const fmtINRshort = (n) => {
   if (n == null || isNaN(n)) return "—";
   if (privacyMode) return "₹" + MASK;
   const abs = Math.abs(n);
@@ -98,7 +110,7 @@ function renderNwDonut(nw) {
     strip.innerHTML = Object.entries(bd).map(([k, v]) =>
       `<div class="nw-alloc-item">
         <div class="nw-alloc-label">${CAT_LABELS[k] || k}</div>
-        <div class="nw-alloc-val" style="color:${cl[k] || '#e6edf3'}">${fmtINR(v)}</div>
+        <div class="nw-alloc-val" style="color:${cl[k] || '#e6edf3'}">${fmtINRshort(v)}</div>
         <div class="nw-alloc-bar" style="background:${cl[k] || '#444'};width:${Math.max(pc[k]||0,2)}px"></div>
         <div class="muted small">${pc[k] || 0}%</div>
       </div>`
@@ -110,7 +122,7 @@ function renderNwDonut(nw) {
         const pct = Math.round(c[k] / total * 100);
         return `<div class="nw-alloc-item">
           <div class="nw-alloc-label">${label}</div>
-          <div class="nw-alloc-val" style="color:${ACCT_COLORS[k]}">${fmtINR(c[k])}</div>
+          <div class="nw-alloc-val" style="color:${ACCT_COLORS[k]}">${fmtINRshort(c[k])}</div>
           <div class="nw-alloc-bar" style="background:${ACCT_COLORS[k]};width:${Math.max(pct,2)}px"></div>
           <div class="muted small">${pct}%</div>
         </div>`;
@@ -228,7 +240,7 @@ function _renderNetWorth(nw) {
     const c = nw.current;
 
     // Headline total
-    document.getElementById("nw-total").textContent = fmtINR(c.total);
+    document.getElementById("nw-total").textContent = fmtINRshort(c.total);
 
     // Net Worth XIRR — overall Personal Rate of Return across all asset classes
     const xirrEl = document.getElementById("nw-xirr");

@@ -29,7 +29,7 @@ from .fi_calc import value_on as fi_value_on
 # Invalidated on any write that changes portfolio data.
 _nw_cache: dict = {}
 _nw_lock = threading.Lock()
-_NW_TTL = 180   # seconds
+_NW_TTL = 1800   # 30 min — fingerprint (txn count) busts it on data change; refresh-prices invalidates explicitly
 
 def _cache_get() -> dict | None:
     with _nw_lock:

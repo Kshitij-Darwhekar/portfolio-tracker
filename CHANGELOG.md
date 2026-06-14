@@ -5,6 +5,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.7.1] — 2026-06-14
+
+### Performance
+- **Analytics result caching** — the heavy read endpoints (holdings, equity curve, summary, XIRR analysis, realized P&L, data-quality, and net worth) are now cached in-process, keyed by a cheap data fingerprint (transaction count + max-id + qty/price/fees sums + corporate-action count). Repeat dashboard loads drop from ~6s of backend work to ~0.2s per endpoint (e.g. summary 1.12s → 14ms, net worth 2.1s → 0.22s, equity-curve 1.1s → 0.22s).
+  - 30-minute TTL; **any data change** (add/edit/delete txn, import, corporate action) busts the cache automatically via the fingerprint, so values are never stale.
+  - **Refresh prices** invalidates the caches explicitly (prices change without a transaction change) and **pre-warms** holdings/curve/net-worth, so the first load after a refresh — including the nightly cron — is fast, not cold.
+  - In-memory only: no schema/DB changes, computed values are identical. The *first* load after a backend restart is still a full ~6s compute; every load after that (within the TTL) is fast.
+
+### Changed
+- **`K` formatting scoped to the Net Worth summary** — the headline + by-account breakdown use the compact form (₹70.4K); detailed segment tabs (Equities/MF/Fixed Income/Bonds/etc.) keep full values (₹70,419.81) via a separate `fmtINRshort` helper.
+
+---
+
 ## [0.7.0] — 2026-06-14
 
 ### Added

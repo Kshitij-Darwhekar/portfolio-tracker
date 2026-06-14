@@ -182,9 +182,13 @@ XIRR computations. X-Ray is lazy-loaded on tab click only (not in either phase).
 
 ## Version
 
-Current: **v0.7.0** — Privacy mode (eye-icon toggle hides all amounts/portfolio
-size, charts blurred, percentages kept; `body.privacy-on` + maskable `fmtINR`/
-`fmtQty`/`fmtUSD`). Plus from v0.6.x: optional HTTP Basic Auth (`APP_PASSWORD`),
+Current: **v0.7.1** — Analytics result caching (in-process, fingerprint-keyed:
+holdings/curve/summary/xirr/realized/data-quality/networth; `cached_call` +
+`_data_fingerprint` + `invalidate_analytics_cache` in analytics.py; 30-min TTL;
+refresh-prices invalidates + pre-warms). K formatting scoped to Net Worth summary
+via `fmtINRshort`. Plus v0.7.0: Privacy mode (eye-icon toggle hides all amounts/
+portfolio size, charts blurred, percentages kept; `body.privacy-on` + maskable
+`fmtINR`/`fmtQty`/`fmtUSD`). Plus from v0.6.x: optional HTTP Basic Auth (`APP_PASSWORD`),
 debug endpoints gated behind `ENABLE_DEBUG_ENDPOINTS`, env-driven compose
 (`.env` / `DATA_DIR`), `scripts/` (backup, refresh-prices, update), Nextcloud
 WebDAV off-device backup, non-root container (`appuser`, uid 1000).

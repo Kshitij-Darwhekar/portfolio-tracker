@@ -25,6 +25,8 @@ from .analytics import (
     compute_realized_pnl_by_period,
     compute_summary,
     compute_xirr_split,
+    cached_call,
+    invalidate_analytics_cache,
     find_orphan_sells,
     portfolio_cashflows,
 )
@@ -60,7 +62,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 # Debug endpoints are off unless explicitly enabled.
 ENABLE_DEBUG_ENDPOINTS = os.environ.get("ENABLE_DEBUG_ENDPOINTS", "").strip().lower() in ("1", "true", "yes", "on")
 
-app = FastAPI(title="Portfolio Tracker", version="0.7.0")
+app = FastAPI(title="Portfolio Tracker", version="0.7.1")
 
 
 @app.middleware("http")
@@ -391,7 +393,8 @@ def summary(
     segment: str | None = Query(None),
     db: Session = Depends(get_session),
 ):
-    return compute_summary(db, segment=segment or None)
+    return cached_call(("summary", segment or "all"), db,
+                       lambda: compute_summary(db, segment=segment or None))
 
 
 @app.get("/api/equity-curve")
@@ -458,7 +461,18 @@ def refresh_prices(db: Session = Depends(get_session)):
             pass
 
     db.commit()
-    s = compute_summary(db)
+    # Prices changed but transactions didn't, so the fingerprint-based caches
+    # wouldn't auto-invalidate — clear them explicitly so values reflect new prices.
+    invalidate_analytics_cache()
+    invalidate_nw_cache()
+    s = compute_summary(db)   # also re-warms the holdings cache
+    # Pre-warm the heavy caches so the next page load (incl. the nightly cron's,
+    # and the user's first load of the day) is fast instead of cold.
+    try:
+        compute_equity_curve(db)
+        compute_networth(db)
+    except Exception:
+        pass
     return {"ok": True, "as_of": s["as_of"], "current_value": s["current_value"],
             "instruments_refreshed": refreshed}
 
@@ -492,12 +506,14 @@ def xirr_analysis(
         y = int(period[3:])
         from_date, to_date = date(y, 4, 1), date(y + 1, 3, 31)
     # period == "all" or None → from_date stays None
-    result = compute_period_xirr(db, from_date, to_date, segment=segment or None)
-    # Active vs closed split is meaningful only on the all-time view; subperiod XIRRs
-    # use opening/closing portfolio values so the split wouldn't map cleanly onto them.
-    if from_date is None:
-        result.update(compute_xirr_split(db, segment=segment or None))
-    return result
+    def _compute():
+        result = compute_period_xirr(db, from_date, to_date, segment=segment or None)
+        # Active vs closed split is meaningful only on the all-time view; subperiod XIRRs
+        # use opening/closing portfolio values so the split wouldn't map cleanly onto them.
+        if from_date is None:
+            result.update(compute_xirr_split(db, segment=segment or None))
+        return result
+    return cached_call(("xirr", period, str(from_date), str(to_date), segment or "all"), db, _compute)
 
 
 @app.get("/api/allocation")
@@ -556,7 +572,8 @@ def realized_pnl(
         from_date = date(today.year, 1, 1)
         to_date = today
     # if period == "all" or None, from_date/to_date stay as None → all-time
-    return compute_realized_pnl_by_period(db, from_date, to_date, segment=segment or None)
+    return cached_call(("realized", str(from_date), str(to_date), segment or "all"), db,
+                       lambda: compute_realized_pnl_by_period(db, from_date, to_date, segment=segment or None))
 
 
 @app.get("/api/data-quality")
@@ -566,7 +583,7 @@ def data_quality(db: Session = Depends(get_session)):
     Common causes: IPO allotments, demerger receipts, off-market transfers.
     For each entry, add a manual buy transaction at the IPO/allotment price to fix.
     """
-    orphans = find_orphan_sells(db)
+    orphans = cached_call(("orphans",), db, lambda: find_orphan_sells(db))
     total_proceeds = sum(o["proceeds"] for o in orphans)
     return {
         "orphan_count": len(orphans),

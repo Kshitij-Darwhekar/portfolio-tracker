@@ -6,7 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .corporate_actions import (
@@ -34,6 +34,96 @@ from .prices import (
     latest_close,
 )
 from .xirr import xirr
+
+import threading as _threading
+import time as _time
+
+# ---------- analytics result cache ----------
+# compute_holdings and compute_equity_curve are pure (derived) computations that
+# several endpoints re-run on every page load (the scipy XIRR solver + per-holding
+# queries cost ~0.4s; the curve ~1.5s). Cache results in-process, keyed by a cheap
+# data fingerprint: any write — add/edit/delete txn, import, corporate action, or
+# Refresh prices — changes the fingerprint and forces a recompute. A short TTL
+# backstops the rare in-place edit. IN-MEMORY ONLY — never touches the DB, so no
+# data can be lost; the worst failure mode is a briefly-stale number.
+_ANALYTICS_TTL = 1800  # 30 min — long, because the fingerprint busts the cache on any data change
+_holdings_cache: dict = {}
+_curve_cache: dict = {}
+_generic_cache: dict = {}
+_holdings_lock = _threading.Lock()
+_curve_lock = _threading.Lock()
+_generic_lock = _threading.Lock()
+
+def cached_call(key, db: Session, compute):
+    """Generic result cache for read endpoints (summary, xirr-analysis, realized-pnl,
+    data-quality, …). `key` must capture every arg that affects the result (segment,
+    period, dates). Auto-invalidates via the same data fingerprint as holdings/curve.
+    Computed outside the lock so warm hits never block."""
+    fp = _data_fingerprint(db)
+    with _generic_lock:
+        ent = _generic_cache.get(key)
+        if ent and ent["fp"] == fp and (_time.time() - ent["ts"]) < _ANALYTICS_TTL:
+            return ent["data"]
+    data = compute()
+    with _generic_lock:
+        _generic_cache[key] = {"data": data, "fp": fp, "ts": _time.time()}
+    return data
+
+def _data_fingerprint(db: Session) -> tuple:
+    """Cheap signature of every input that affects holdings/curve results, so the
+    cache auto-invalidates on any data change (no fragile per-endpoint hooks):
+      - count + max(id)            → catches add / delete / import
+      - sums of qty / price / fees → catches in-place edits (PATCH)
+      - corporate-action count     → catches splits / bonuses / dividends
+    Price refreshes don't change transactions, so refresh-prices also calls
+    invalidate_analytics_cache() explicitly. All aggregates over the (small)
+    transactions table — ~1ms, no price_cache scan."""
+    txn_count = db.execute(select(func.count(Transaction.id))).scalar() or 0
+    txn_max   = db.execute(select(func.max(Transaction.id))).scalar() or 0
+    ca_count  = db.execute(select(func.count(CorporateAction.id))).scalar() or 0
+    sums = db.execute(select(
+        func.coalesce(func.sum(Transaction.quantity), 0),
+        func.coalesce(func.sum(Transaction.price), 0),
+        func.coalesce(func.sum(Transaction.fees), 0),
+    )).one()
+    return (txn_count, txn_max, ca_count, float(sums[0]), float(sums[1]), float(sums[2]))
+
+def invalidate_analytics_cache() -> None:
+    """Drop cached holdings/curve immediately (optional; fingerprint also covers writes)."""
+    with _holdings_lock:
+        _holdings_cache.clear()
+    with _curve_lock:
+        _curve_cache.clear()
+    with _generic_lock:
+        _generic_cache.clear()
+
+def compute_holdings(db: Session, today: date | None = None, segment: str | None = None) -> list[HoldingRow]:
+    """Cached wrapper: returns the same result as _compute_holdings_impl, but
+    reuses it across the several endpoints that need it within one page load."""
+    today = today or date.today()
+    key = (segment or "all", today.isoformat())
+    fp = _data_fingerprint(db)
+    with _holdings_lock:
+        ent = _holdings_cache.get(key)
+        if ent and ent["fp"] == fp and (_time.time() - ent["ts"]) < _ANALYTICS_TTL:
+            return ent["data"]
+        data = _compute_holdings_impl(db, today, segment)
+        _holdings_cache[key] = {"data": data, "fp": fp, "ts": _time.time()}
+        return data
+
+def compute_equity_curve(db: Session, benchmarks: list[str] | None = None,
+                         today: date | None = None, segment: str | None = None) -> dict:
+    """Cached wrapper around _compute_equity_curve_impl (the heavy, uncached builder)."""
+    today = today or date.today()
+    key = (segment or "all", tuple(benchmarks or []), today.isoformat())
+    fp = _data_fingerprint(db)
+    with _curve_lock:
+        ent = _curve_cache.get(key)
+        if ent and ent["fp"] == fp and (_time.time() - ent["ts"]) < _ANALYTICS_TTL:
+            return ent["data"]
+        data = _compute_equity_curve_impl(db, benchmarks, today, segment)
+        _curve_cache[key] = {"data": data, "fp": fp, "ts": _time.time()}
+        return data
 
 
 # ---------- holdings ----------
@@ -108,7 +198,7 @@ def _per_holding_xirr(
     return xirr(flows)
 
 
-def compute_holdings(db: Session, today: date | None = None, segment: str | None = None) -> list[HoldingRow]:
+def _compute_holdings_impl(db: Session, today: date | None = None, segment: str | None = None) -> list[HoldingRow]:
     today = today or date.today()
     q = select(Transaction)
     if segment:
@@ -1146,7 +1236,7 @@ def compute_xirr_split(db: Session, segment: str | None = None) -> dict:
     }
 
 
-def compute_equity_curve(
+def _compute_equity_curve_impl(
     db: Session,
     benchmarks: list[str] | None = None,
     today: date | None = None,

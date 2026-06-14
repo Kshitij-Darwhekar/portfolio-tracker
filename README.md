@@ -237,6 +237,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 | Version | Date | Highlights |
 |---|---|---|
+| **0.7.1** | 2026-06-14 | Analytics result caching — repeat dashboard loads ~3× faster (summary 1.1s→14ms, net worth 2.1s→0.2s); K formatting scoped to the Net Worth summary |
 | **0.7.0** | 2026-06-14 | Privacy mode — eye-icon toggle hides all amounts/portfolio size (charts blurred, percentages kept) for screenshots/demos |
 | **0.6.2** | 2026-06-14 | Container runs as non-root (`appuser`, uid 1000) — drops root while keeping DB write access |
 | **0.6.1** | 2026-06-13 | Off-device backup to Nextcloud (WebDAV) in `backup.sh`; secrets read from `.env`, not crontab |
