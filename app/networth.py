@@ -406,6 +406,11 @@ def compute_networth(db: Session) -> dict:
     except Exception as _e:
         log.debug("NW XIRR failed: %s", _e)
 
+    # Combined daily gain across the market-linked holdings (EQ + MF). FD/EPF have
+    # no daily market price, so they don't contribute a day change.
+    eq_mf_day_change = sum(h.day_change or 0 for h in holdings if h.segment in ("EQ", "MF"))
+    prev_total = total - eq_mf_day_change   # % is vs yesterday's total net worth
+
     result = {
         "current": {
             "equity": round(eq_val, 2),
@@ -414,6 +419,8 @@ def compute_networth(db: Session) -> dict:
             "epf":    round(epf_val, 2),
             "bonds":  round(bond_val, 2),
             "total":  round(total, 2),
+            "day_change":     round(eq_mf_day_change, 2),
+            "day_change_pct": (eq_mf_day_change / prev_total) if prev_total else None,
         },
         "nw_xirr": nw_xirr,
         "allocation": {

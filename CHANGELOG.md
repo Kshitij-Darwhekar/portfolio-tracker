@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.9.0] — 2026-06-14
+
+### Added
+- **Daily gain (day's P&L)** — the change since the previous close, in three places:
+  - A sortable **Day** column in the Equities/MF holdings table (per-holding ₹ + %).
+  - A **"Day's Gain"** summary card on All / Equities / Mutual Funds.
+  - A **"Today ±₹… (…%)"** line under the Net Worth headline (combined EQ+MF; % of total net worth).
+  - Computed as `qty × (latest close − previous close)` straight from `price_cache` — reuses `latest_close` (prev close = `latest_close(today − 1 day)`), no extra fetch. Reflects the change since the last price refresh (cache-based, not a live ticker). FD/EPF have no daily market price and don't contribute.
+
+---
+
 ## [0.8.0] — 2026-06-14
 
 ### Added

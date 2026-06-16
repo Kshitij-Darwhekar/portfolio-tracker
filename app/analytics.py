@@ -144,6 +144,8 @@ class HoldingRow:
     unrealized_pnl: float | None
     pct_return: float | None
     xirr: float | None
+    day_change: float | None = None      # today's value change vs previous close (qty × Δprice)
+    day_change_pct: float | None = None   # per-unit % change vs previous close
 
 
 def _txns_by_isin(txns: list[Transaction]) -> dict[str, list[Transaction]]:
@@ -232,6 +234,19 @@ def _compute_holdings_impl(db: Session, today: date | None = None, segment: str 
                 cur_price = None
             if cur_price is not None:
                 cur_value = qty * cur_price
+        # Daily gain: today's price vs the previous close. The prev close is the
+        # most recent cached close on/before yesterday — reuses latest_close, no
+        # extra fetch (cache_only=True, since past closes are always cached).
+        day_change = None
+        day_change_pct = None
+        if qty > 0 and cur_price is not None and inst is not None:
+            try:
+                prev_close = latest_close(db, inst, today - timedelta(days=1), cache_only=True)
+            except Exception:
+                prev_close = None
+            if prev_close:
+                day_change = qty * (cur_price - prev_close)
+                day_change_pct = (cur_price - prev_close) / prev_close
         unrealized = (cur_value - qty * avg) if cur_value is not None else None
         pct = None
         if qty > 0 and avg > 0 and cur_price is not None:
@@ -264,6 +279,8 @@ def _compute_holdings_impl(db: Session, today: date | None = None, segment: str 
                 unrealized_pnl=unrealized,
                 pct_return=pct,
                 xirr=x,
+                day_change=day_change,
+                day_change_pct=day_change_pct,
             )
         )
     db.commit()
@@ -931,6 +948,9 @@ def compute_summary(db: Session, today: date | None = None, segment: str | None 
                 "current_value": sim_value,
             }
 
+    # Daily gain: sum of per-holding day changes (EQ+MF); % vs yesterday's value.
+    day_change = sum(h.day_change or 0 for h in holdings)
+    prev_value = eq_mf_value - day_change
     return {
         "invested": invested,
         "current_value": current_value,
@@ -939,6 +959,8 @@ def compute_summary(db: Session, today: date | None = None, segment: str | None 
         "total_pnl": total_pnl,
         "pct_return": (total_pnl / invested) if invested else None,
         "portfolio_xirr": portfolio_xirr,
+        "day_change": day_change,
+        "day_change_pct": (day_change / prev_value) if prev_value else None,
         "benchmarks": bench,
         "as_of": today.isoformat(),
     }

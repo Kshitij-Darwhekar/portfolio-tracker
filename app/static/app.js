@@ -274,6 +274,18 @@ function _renderNetWorth(nw) {
         xirrEl.textContent = "";
       }
     }
+    // Combined daily gain (EQ + MF) since the previous close
+    const dayEl = document.getElementById("nw-day");
+    if (dayEl) {
+      const dc = c.day_change;
+      if (dc != null && dc !== 0) {
+        const pos = dc >= 0;
+        const pctStr = c.day_change_pct != null ? ` (${pos ? "+" : ""}${(c.day_change_pct * 100).toFixed(2)}%)` : "";
+        dayEl.innerHTML = `<span class="muted">Today</span> <span class="${pos ? 'pos' : 'neg'}">${pos ? "+" : ""}${fmtINRshort(dc)}${pctStr}</span>`;
+      } else {
+        dayEl.textContent = "";
+      }
+    }
     document.getElementById("nw-asof").textContent  = `As of ${nw.as_of}`;
 
     nwData = nw;
@@ -2195,6 +2207,13 @@ async function loadSummary() {
 
   cards.innerHTML += card("Invested", amt(s.invested), "active holdings cost basis");
   cards.innerHTML += card("Current Value", amt(s.current_value), "active holdings at market");
+  // Day's gain — change since the previous close (needs a price refresh to be current)
+  cards.innerHTML += card(
+    "Day's Gain",
+    amt(s.day_change),
+    (s.day_change_pct != null ? fmtPct(s.day_change_pct) + " · " : "") + "since prev close",
+    cls(s.day_change)
+  );
   // Unrealized P&L — directly comparable to Zerodha's portfolio widget
   cards.innerHTML += card(
     "Unrealized P&L",
@@ -2292,13 +2311,14 @@ function renderHoldings() {
         <td class="num">${amt(r.current_price)}</td>
         <td class="num">${amt(r.invested)}</td>
         <td class="num">${amt(r.current_value)}</td>
+        <td class="num ${cls(r.day_change)}">${r.day_change != null ? `${amt(r.day_change)} <span class="muted" style="font-size:10px">${fmtPct(r.day_change_pct)}</span>` : "—"}</td>
         <td class="num ${cls(pnl)}">${amt(pnl)}${hasRealized ? `<div class="muted" style="font-size:10px" title="Realized gain from past switch/sale">${fmtINR(r.realized_pnl)} realized</div>` : ''}</td>
         <td class="num ${cls(r.pct_return)}">${fmtPct(r.pct_return)}</td>
         <td class="num ${cls(r.xirr)}">${fmtPct(r.xirr)}</td>
       </tr>`;
   }
   if (!tbody.innerHTML) {
-    tbody.innerHTML = `<tr><td colspan="10" class="muted" style="text-align:center;padding:20px;">No holdings yet — import your tradebook to get started.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" class="muted" style="text-align:center;padding:20px;">No holdings yet — import your tradebook to get started.</td></tr>`;
   }
 }
 

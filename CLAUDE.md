@@ -197,7 +197,10 @@ prices.py) is now only a **fallback** for stocks outside the top 500.
 
 When in doubt: "does this add a capability the user didn't have?" → MINOR; "does it fix/improve something that existed?" → PATCH.
 
-Current: **v0.8.0** — X-Ray "Insights" panel: data-driven allocation observations
+Current: **v0.9.0** — Daily gain (day's P&L vs previous close): per-holding **Day**
+column, "Day's Gain" summary card, and a Net Worth "Today" line. Computed in
+`compute_holdings`/`compute_summary`/`compute_networth` via `latest_close(today-1)`.
+Plus v0.8.0: X-Ray "Insights" panel: data-driven allocation observations
 (`_xrayInsights` in app.js) + auto-rotating cited educational tips (`CURATED_TIPS`,
 12s timer), framed as education-not-advice. Plus v0.7.4: Large/Mid/Small-cap classification now uses the official
 NSE/AMFI ranking (NIFTY 100/Midcap 150/Smallcap 250 via `app/cap_classification.py`,
