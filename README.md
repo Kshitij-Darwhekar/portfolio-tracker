@@ -238,6 +238,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 | Version | Date | Highlights |
 |---|---|---|
+| **0.9.1** | 2026-06-16 | Fix: stocks outside the top 500 (e.g. YATHARTH) now classify as small-cap (not mid via the market-cap guess); MF "Invested" ⓘ explainer for the switch redeem+re-buy convention |
 | **0.9.0** | 2026-06-14 | Daily gain (day's P&L) — per-holding Day column, Day's Gain summary card, and a Net Worth "today" line |
 | **0.8.0** | 2026-06-14 | X-Ray Insights panel — data-driven allocation observations + auto-rotating cited educational tips (education, not advice) |
 | **0.7.4** | 2026-06-14 | Cap classification (Large/Mid/Small) now uses the official NSE/AMFI ranking (NIFTY 100/Midcap 150/Smallcap 250) instead of live market cap — fixes misclassifications |

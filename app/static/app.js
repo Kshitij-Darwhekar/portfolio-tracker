@@ -2205,7 +2205,13 @@ async function loadSummary() {
   const card = (title, value, sub, klass = "") =>
     `<div class="card"><h3>${title}</h3><div class="value ${klass}">${value}</div>${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
 
-  cards.innerHTML += card("Invested", amt(s.invested), "active holdings cost basis");
+  // On MF/All, flag that switches are booked as redeem+re-buy (tax-correct), which
+  // raises Invested vs apps that carry the old cost forward. Separate ⓘ icon so the
+  // value's click/hover-to-reveal-exact behaviour is untouched.
+  const investedInfo = (activeSegment === "MF" || activeSegment === "all")
+    ? ` <span class="info-i" title="Fund switches are treated as redeem + re-buy (the Indian tax treatment): the switch-out gain is realised into Realized P&L and the new fund's cost basis becomes its switch-in value. Apps that carry the old cost forward (e.g. INDMoney) may show a lower Invested and higher unrealised return — the total return is the same.">&#9432;</span>`
+    : "";
+  cards.innerHTML += card("Invested" + investedInfo, amt(s.invested), "active holdings cost basis");
   cards.innerHTML += card("Current Value", amt(s.current_value), "active holdings at market");
   // Day's gain — change since the previous close (needs a price refresh to be current)
   cards.innerHTML += card(

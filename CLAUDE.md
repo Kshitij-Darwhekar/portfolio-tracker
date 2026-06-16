@@ -145,9 +145,15 @@ not a live market-cap number:
 | Small cap | NIFTY Smallcap 250 (251–500) |
 
 Matched to holdings by **ISIN → symbol**; cached at `data/cap_classification.json`.
-Refreshed via the X-Ray "Refresh market data" button. The old yfinance `marketCap`
-vs ₹40,000 Cr / ₹8,000 Cr thresholds (`_LARGE_CAP_MIN_INR` / `_MID_CAP_MIN_INR` in
-prices.py) is now only a **fallback** for stocks outside the top 500.
+Refreshed via the X-Ray "Refresh market data" button.
+
+**Stocks outside the top 500** (not in any of the three lists) are classified **small**
+by SEBI definition — anything ranked beyond Smallcap 250 is still small-cap. So in
+`prices.py`, when `cap_classification.lists_loaded()` is true but `get_cap_category`
+returns `None`, we default to `"small"` (not the yfinance market-cap guess, which
+mislabelled e.g. YATHARTH as mid). The old yfinance `marketCap` vs ₹40,000 Cr / ₹8,000 Cr
+thresholds (`_LARGE_CAP_MIN_INR` / `_MID_CAP_MIN_INR`) are used **only** when the NSE
+lists can't load at all.
 
 ---
 
@@ -181,7 +187,11 @@ prices.py) is now only a **fallback** for stocks outside the top 500.
 ## Known limitations
 
 - No auth — run behind VPN or reverse-proxy auth
-- Switch cost basis: ₹1,482 discrepancy vs INDMoney for switched MF positions
+- Switch cost basis differs from INDMoney by ~₹1,600 — **intentional, not a defect**: we
+  book a fund switch as redeem+re-buy (tax-correct), realising the switch gain into Realized
+  P&L and setting the new fund's cost basis to its switch-in value. INDMoney appears to carry
+  the old cost forward (higher unrealised, lower realised). Total return is identical. v0.9.1
+  adds a ⓘ tooltip on MF Invested explaining this.
 - MF dividend reinvestment captured as buy; separate dividend payouts not tracked as cashflows
 - Phase 2 MF look-through (which stocks inside MFs) not yet implemented
 - No mobile-optimised layout yet
@@ -197,7 +207,9 @@ prices.py) is now only a **fallback** for stocks outside the top 500.
 
 When in doubt: "does this add a capability the user didn't have?" → MINOR; "does it fix/improve something that existed?" → PATCH.
 
-Current: **v0.9.0** — Daily gain (day's P&L vs previous close): per-holding **Day**
+Current: **v0.9.1** — MF "Invested" ⓘ explainer (no logic change): clarifies that
+switches are booked as redeem+re-buy (tax-correct), so Invested is higher than
+apps that carry old cost forward; total return identical. Plus v0.9.0: Daily gain (day's P&L vs previous close): per-holding **Day**
 column, "Day's Gain" summary card, and a Net Worth "Today" line. Computed in
 `compute_holdings`/`compute_summary`/`compute_networth` via `latest_close(today-1)`.
 Plus v0.8.0: X-Ray "Insights" panel: data-driven allocation observations

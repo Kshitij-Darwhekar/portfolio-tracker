@@ -114,6 +114,14 @@ def _load_cap_index(force: bool = False) -> int:
     return len(_by_symbol)
 
 
+def lists_loaded() -> bool:
+    """True if the official NSE constituent lists are available (memory or disk).
+    Lets callers distinguish 'not in the top 500' (→ small by SEBI definition) from
+    'lists unavailable' (→ fall back to a market-cap guess). No network fetch."""
+    _load_cap_index()
+    return bool(_by_isin or _by_symbol)
+
+
 def get_cap_category(isin: str | None, symbol: str | None) -> str | None:
     """'large' | 'mid' | 'small', or None if not in the top-500 lists (caller may
     fall back). Matches by ISIN first (stable across ticker renames), then symbol.

@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.9.1] — 2026-06-16
+
+### Fixed
+- **Small-cap classification for stocks outside the top 500** — holdings not in NIFTY 100 (large) or Midcap 150 (mid) are now correctly labelled **small**, since by SEBI definition anything ranked beyond the Smallcap 250 is still small-cap (the Smallcap 250 list is only the *top* 250 smallcaps). Previously such stocks (e.g. **YATHARTH**) fell through to the yfinance market-cap threshold and could be mislabelled **mid**. The market-cap guess is now used only when the official NSE lists can't load at all. Re-run **X-Ray → Refresh market data** to reclassify existing holdings.
+
+### Changed
+- **MF "Invested" explainer (no logic change)** — a small ⓘ tooltip on the Invested card (MF / All tabs) clarifies that fund **switches are booked as redeem + re-buy** (the Indian tax treatment): the switch-out gain is realised into Realized P&L and the new fund's cost basis becomes its switch-in value. This makes our Invested higher (and unrealised return lower) than apps that carry the old cost forward (e.g. INDMoney) — but the **total** return is identical. Confirmed via the data (5 switch pairs, ~₹5.8k of switch gains correctly sitting in Realized P&L); the cost-basis method is intentional and tax-correct, not a defect. The value's click/hover-to-reveal-exact behaviour is unaffected (the ⓘ is a separate icon).
+
+---
+
 ## [0.9.0] — 2026-06-14
 
 ### Added

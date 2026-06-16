@@ -62,7 +62,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 # Debug endpoints are off unless explicitly enabled.
 ENABLE_DEBUG_ENDPOINTS = os.environ.get("ENABLE_DEBUG_ENDPOINTS", "").strip().lower() in ("1", "true", "yes", "on")
 
-app = FastAPI(title="Portfolio Tracker", version="0.9.0")
+app = FastAPI(title="Portfolio Tracker", version="0.9.1")
 
 
 @app.middleware("http")

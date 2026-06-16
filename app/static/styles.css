@@ -44,6 +44,7 @@
 
 /* Amounts that reveal their exact value on hover (desktop) / tap (mobile).
    Subtle dotted underline only on hover so it isn't noisy at rest. */
+.info-i { color: var(--muted); cursor: help; font-size: 11px; margin-left: 4px; }
 .amt { cursor: help; }
 .amt:hover { text-decoration: underline dotted; text-underline-offset: 2px; }
 

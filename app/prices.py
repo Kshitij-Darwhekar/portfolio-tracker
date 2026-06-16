@@ -260,14 +260,22 @@ def fetch_instrument_meta(db: Session, inst: "Instrument") -> dict:
     # Cap category: prefer the official NSE/AMFI rank-based list (stable; doesn't
     # flip with the share price). yfinance market cap is only a fallback for the
     # rare holding outside the top-500 lists.
-    from .cap_classification import get_cap_category
+    from .cap_classification import get_cap_category, lists_loaded
     cap_cat = get_cap_category(inst.isin, sym)
+    # If the official lists are loaded but this stock isn't in NIFTY 100 / Midcap 150,
+    # it ranks beyond the top 250 and is therefore *small* by SEBI definition — the
+    # Smallcap 250 list is only the top 250 smallcaps, not the whole smallcap universe.
+    # The yfinance market-cap threshold is used only when the lists couldn't load at all
+    # (it mislabels sub-top-500 stocks like YATHARTH as mid).
+    lists_ok = lists_loaded()
+    if cap_cat is None and lists_ok:
+        cap_cat = "small"
 
     ticker_str = inst.yf_ticker or resolve_yf_ticker(sym, "NSE")
     try:
         info = yf.Ticker(ticker_str).info
         sector = info.get("sector") or None
-        if cap_cat is None:
+        if cap_cat is None:   # lists unavailable → fall back to live market cap
             market_cap = info.get("marketCap") or 0
             if market_cap >= _LARGE_CAP_MIN_INR:
                 cap_cat = "large"
