@@ -5,6 +5,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.10.0] — 2026-06-16
+
+### Added
+- **Read-only MCP server for AI tools** (`app/mcp_server.py`) — exposes the portfolio to any
+  MCP-capable client (Claude Desktop, Claude Code, ChatGPT, Gemini, Cursor…) for conversational
+  insights. Seven read-only tools wrap the existing analytics: `list_holdings`,
+  `portfolio_summary`, `allocation_breakdown`, `xirr_analysis`, `realized_pnl`, `net_worth`,
+  `data_quality`. Served over **Streamable HTTP** (mounted at `/mcp`, sharing the app's port +
+  Twingate exposure) and **stdio** (`python -m app.mcp_server`) from one tool definition.
+  - **Off by default** (`ENABLE_MCP=1`), **bearer-token gated** (`MCP_TOKEN`), with a Host
+    allowlist for DNS-rebinding protection (`MCP_ALLOWED_HOSTS`). `/mcp` is exempt from the
+    human Basic Auth and uses the token instead.
+  - **PII-stripped**: ISIN, folio, trade/order id, UAN, member/account/client id and PAN are
+    removed from every payload; symbols and scheme names are kept.
+  - Safety note (in `docs/mcp.md`): the AI model is cloud-hosted, so analysed data reaches the
+    provider — keep the endpoint behind the VPN. Cloud *web* apps can't reach a Twingate-only
+    host; that needs deliberate public exposure (documented, not enabled).
+  - Startup converted from `@app.on_event` to a `lifespan` (runs `init_db` + the MCP session
+    manager). See `docs/mcp.md` for per-client setup.
+
+---
+
 ## [0.9.1] — 2026-06-16
 
 ### Fixed

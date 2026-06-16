@@ -17,3 +17,9 @@ services:
       - APP_PASSWORD=${APP_PASSWORD:-}
       # Set to 1 only when troubleshooting imports; exposes /api/debug/* routes.
       - ENABLE_DEBUG_ENDPOINTS=${ENABLE_DEBUG_ENDPOINTS:-}
+      # Read-only MCP server for AI tools (Claude/ChatGPT/Gemini). Off unless ENABLE_MCP=1.
+      # Set MCP_TOKEN to a long random secret and add the Pi's host to MCP_ALLOWED_HOSTS.
+      # See docs/mcp.md. Mounted at http://<host>:8000/mcp on this same port.
+      - ENABLE_MCP=${ENABLE_MCP:-}
+      - MCP_TOKEN=${MCP_TOKEN:-}
+      - MCP_ALLOWED_HOSTS=${MCP_ALLOWED_HOSTS:-}

@@ -7,3 +7,4 @@ yfinance>=0.2.40
 requests>=2.31
 scipy>=1.11
 python-multipart>=0.0.9
+mcp>=1.12          # read-only MCP server for AI tools (app/mcp_server.py); only used when ENABLE_MCP=1

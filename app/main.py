@@ -5,6 +5,7 @@ import csv
 import io
 import os
 import secrets
+from contextlib import asynccontextmanager
 from datetime import date, datetime
 from pathlib import Path
 
@@ -61,8 +62,26 @@ APP_USERNAME = os.environ.get("APP_USERNAME", "admin")
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 # Debug endpoints are off unless explicitly enabled.
 ENABLE_DEBUG_ENDPOINTS = os.environ.get("ENABLE_DEBUG_ENDPOINTS", "").strip().lower() in ("1", "true", "yes", "on")
+# Read-only MCP server for AI tools — off unless explicitly enabled (mounted at /mcp below).
+ENABLE_MCP = os.environ.get("ENABLE_MCP", "").strip().lower() in ("1", "true", "yes", "on")
 
-app = FastAPI(title="Portfolio Tracker", version="0.9.1")
+# Set during the MCP mount below (when ENABLE_MCP); the lifespan runs it at startup.
+_mcp_session_run = None
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Initialise the DB, and (when enabled) run the MCP streamable-HTTP session manager.
+    Replaces the old @app.on_event('startup') — on_event is ignored once a lifespan is set."""
+    init_db()
+    if _mcp_session_run is not None:
+        async with _mcp_session_run():
+            yield
+    else:
+        yield
+
+
+app = FastAPI(title="Portfolio Tracker", version="0.10.0", lifespan=_lifespan)
 
 
 @app.middleware("http")
@@ -70,6 +89,10 @@ async def basic_auth(request: Request, call_next):
     """Gate the whole app behind HTTP Basic Auth when APP_PASSWORD is set.
     No-op when unset, so local/dev use is unchanged. Uses constant-time
     comparison to avoid leaking credentials via timing."""
+    # The MCP endpoint has its own bearer-token guard (MCP_TOKEN), and MCP clients don't
+    # speak HTTP Basic — exempt it here so the two auth schemes don't collide.
+    if request.url.path.startswith("/mcp"):
+        return await call_next(request)
     if APP_PASSWORD:
         header = request.headers.get("Authorization", "")
         authorized = False
@@ -90,9 +113,12 @@ async def basic_auth(request: Request, call_next):
     return await call_next(request)
 
 
-@app.on_event("startup")
-def _startup() -> None:
-    init_db()
+if ENABLE_MCP:
+    # Mount the read-only MCP server at /mcp (shares this port + Twingate exposure + the
+    # off-device VPN). build_http_app() also creates the session manager that _lifespan runs.
+    from .mcp_server import build_http_app, mcp as _mcp
+    app.mount("/mcp", build_http_app())
+    _mcp_session_run = _mcp.session_manager.run
 
 
 # --- root ---

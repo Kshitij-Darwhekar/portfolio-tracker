@@ -48,6 +48,12 @@ Self-hosted personal finance dashboard for Indian equities (NSE/BSE) and mutual 
 - **Sell guard** — new sells are restricted to held instruments (autocomplete from holdings + quantity check) to prevent typos creating orphan sells
 - **Responsive** — adapts to phone/tablet (used over Twingate); summary amounts reveal their exact value on hover/tap
 
+### AI access (MCP)
+- **Read-only MCP server** — connect Claude Desktop/Code, ChatGPT, Gemini or any MCP client to
+  ask for insights against your real numbers (allocation, returns, realised gains, net worth).
+  Off by default; bearer-token gated; PII-stripped; VPN-only. Served over Streamable HTTP
+  (`/mcp`) and stdio. Setup + safety notes in **[docs/mcp.md](docs/mcp.md)**.
+
 ---
 
 ## Tech stack
@@ -98,6 +104,9 @@ All configuration is via environment variables (see `.env.example`):
 | `APP_USERNAME` | `admin` | Basic Auth username (only used if a password is set) |
 | `APP_PASSWORD` | _(empty)_ | Set to require HTTP Basic Auth on every request. Empty = no auth. |
 | `ENABLE_DEBUG_ENDPOINTS` | _(empty)_ | Set to `1` to expose `/api/debug/*` (troubleshooting only) |
+| `ENABLE_MCP` | _(empty)_ | Set to `1` to mount the read-only AI/MCP server at `/mcp` (see [docs/mcp.md](docs/mcp.md)) |
+| `MCP_TOKEN` | _(empty)_ | Bearer token required on `/mcp`. Generate a long random secret; strongly recommended when `ENABLE_MCP=1` |
+| `MCP_ALLOWED_HOSTS` | _(empty)_ | Comma-separated Host allowlist for `/mcp` (DNS-rebinding protection). Add the host you connect on, or `*` to disable the check |
 | `NEXTCLOUD_URL` / `NEXTCLOUD_USER` / `NEXTCLOUD_APP_PASSWORD` | _(empty)_ | Off-device backup target for `scripts/backup.sh` (WebDAV). Use a Nextcloud **app password**, not your account password. |
 | `NEXTCLOUD_REMOTE_DIR` | `Backups/portfolio` | Folder inside Nextcloud to upload the DB to |
 
@@ -238,6 +247,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 | Version | Date | Highlights |
 |---|---|---|
+| **0.10.0** | 2026-06-16 | Read-only **MCP server** — connect Claude/ChatGPT/Gemini to the portfolio for AI insights (off by default, token-gated, PII-stripped, VPN-only). See [docs/mcp.md](docs/mcp.md) |
 | **0.9.1** | 2026-06-16 | Fix: stocks outside the top 500 (e.g. YATHARTH) now classify as small-cap (not mid via the market-cap guess); MF "Invested" ⓘ explainer for the switch redeem+re-buy convention |
 | **0.9.0** | 2026-06-14 | Daily gain (day's P&L) — per-holding Day column, Day's Gain summary card, and a Net Worth "today" line |
 | **0.8.0** | 2026-06-14 | X-Ray Insights panel — data-driven allocation observations + auto-rotating cited educational tips (education, not advice) |

@@ -59,6 +59,7 @@ app/
   global_equity_analytics.py  US equity XIRR, P&L, tax (STCG/LTCG)
   fi_rates.py              Configurable benchmark rates (data/fi_rates.json)
   xirr.py                  XIRR solver (brentq + Newton-Raphson fallback)
+  mcp_server.py            Read-only MCP server for AI tools (7 analytics tools; PII-stripped)
   static/
     index.html             Single-page app shell
     app.js                 All frontend logic
@@ -207,7 +208,14 @@ lists can't load at all.
 
 When in doubt: "does this add a capability the user didn't have?" → MINOR; "does it fix/improve something that existed?" → PATCH.
 
-Current: **v0.9.1** — MF "Invested" ⓘ explainer (no logic change): clarifies that
+Current: **v0.10.0** — Read-only **MCP server** (`app/mcp_server.py`): 7 analytics tools
+(`list_holdings`, `portfolio_summary`, `allocation_breakdown`, `xirr_analysis`,
+`realized_pnl`, `net_worth`, `data_quality`) for AI tools (Claude/ChatGPT/Gemini).
+Streamable HTTP mounted at `/mcp` (shares the app port) + stdio (`python -m app.mcp_server`).
+Off unless `ENABLE_MCP=1`; bearer-token gated (`MCP_TOKEN`); `MCP_ALLOWED_HOSTS` for
+DNS-rebinding; PII-stripped via `_strip()`. `/mcp` is exempt from Basic Auth. Startup moved
+from `@app.on_event` to a `lifespan` (runs `init_db` + the MCP session manager). Docs in
+`docs/mcp.md`. Plus v0.9.1: MF "Invested" ⓘ explainer (no logic change): clarifies that
 switches are booked as redeem+re-buy (tax-correct), so Invested is higher than
 apps that carry old cost forward; total return identical. Plus v0.9.0: Daily gain (day's P&L vs previous close): per-holding **Day**
 column, "Day's Gain" summary card, and a Net Worth "Today" line. Computed in
@@ -234,4 +242,6 @@ See CHANGELOG.md for full history.
 
 **Config**: all via env (see `.env.example`) — `DATA_DIR` (DB host path),
 `APP_USERNAME`/`APP_PASSWORD` (Basic Auth, off when password empty),
-`ENABLE_DEBUG_ENDPOINTS`. Auth middleware lives at the top of `main.py`.
+`ENABLE_DEBUG_ENDPOINTS`, `ENABLE_MCP`/`MCP_TOKEN`/`MCP_ALLOWED_HOSTS` (read-only AI MCP
+server at `/mcp`, off by default — see `docs/mcp.md`). Auth middleware lives at the top of
+`main.py`; the `lifespan` there runs `init_db` and (when enabled) the MCP session manager.
