@@ -28,3 +28,6 @@ data/cap_classification.json
 
 # Codex config — contains a live MCP bearer token
 .codex/config.toml
+
+# Local Claude Code tooling (skills, etc.) — personal, not project code
+.claude/
