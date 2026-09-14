@@ -7,5 +7,8 @@ yfinance>=0.2.40
 requests>=2.31
 scipy>=1.11
 python-multipart>=0.0.9
-mcp>=1.12          # read-only MCP server for AI tools (app/mcp_server.py); only used when ENABLE_MCP=1
+mcp>=1.28.1,<2     # read-only MCP server for AI tools (app/mcp_server.py); only used when ENABLE_MCP=1
+                   # <2 pinned deliberately: mcp 2.x renames FastMCP->MCPServer and breaks this
+                   # code; >=1.28.1 picks up the PYSEC-2026-3483 fix (unreachable here anyway,
+                   # since we use streamable_http_app, not the vulnerable WebSocket transport)
 pymupdf>=1.24      # PDF text extraction for EPF passbook + CAMS/KFintech CAS import
