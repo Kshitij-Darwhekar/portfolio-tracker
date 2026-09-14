@@ -2,4 +2,4 @@
 url = "http://localhost:8000/mcp"
 
 [mcp_servers.portfolio.http_headers]
-Authorization = "Bearer I6DB-TogPiWLDzlsguMc9PVqVNUlBdfafEiXQNI2vG8"
+Authorization = "Bearer REPLACE_WITH_YOUR_MCP_TOKEN"

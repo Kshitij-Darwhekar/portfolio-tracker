@@ -25,3 +25,6 @@ data/cap_classification.json
 .DS_Store
 .idea/
 .vscode/
+
+# Codex config — contains a live MCP bearer token
+.codex/config.toml
