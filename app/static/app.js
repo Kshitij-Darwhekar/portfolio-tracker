@@ -1255,7 +1255,7 @@ async function loadFiHoldings() {
         : `Matured ${Math.abs(r.days_to_maturity)}d ago`;
       tbody.innerHTML += `
         <tr data-id="${r.id}">
-          <td><strong>${r.bank}</strong>${r.account_no ? `<div class="muted" style="font-size:11px">${r.account_no}</div>` : ""}</td>
+          <td><strong>${escapeHtml(r.bank)}</strong>${r.account_no ? `<div class="muted" style="font-size:11px">${escapeHtml(r.account_no)}</div>` : ""}</td>
           <td class="muted">${typeLabel}</td>
           <td class="num">${fmtINR(r.amount)}</td>
           <td class="num">${r.interest_rate}%</td>
@@ -2302,10 +2302,10 @@ function renderHoldings() {
     const pnl = isActive ? (r.unrealized_pnl ?? 0) : (r.realized_pnl ?? 0);
     const hasRealized = isActive && Math.abs(r.realized_pnl || 0) > 1;
     const nameCell = activeSegment === "MF"
-      ? `<td><div style="font-size:12px;max-width:220px;white-space:normal;line-height:1.4">${r.display_name || r.symbol}</div></td>`
-      : `<td>${r.display_name || r.symbol}</td>`;
+      ? `<td><div style="font-size:12px;max-width:220px;white-space:normal;line-height:1.4">${escapeHtml(r.display_name || r.symbol)}</div></td>`
+      : `<td>${escapeHtml(r.display_name || r.symbol)}</td>`;
     const folioCell = activeSegment === "MF"
-      ? `<td class="muted" style="font-size:11px">${r.folio || "—"}</td>` : "";
+      ? `<td class="muted" style="font-size:11px">${escapeHtml(r.folio || "—")}</td>` : "";
 
     tbody.innerHTML += `
       <tr>
@@ -2349,7 +2349,7 @@ async function loadTransactions() {
     tbody.innerHTML += `
       <tr data-id="${t.id}">
         <td>${t.trade_date}</td>
-        <td>${t.symbol}</td>
+        <td>${escapeHtml(t.symbol)}</td>
         <td>${t.segment}</td>
         <td class="${t.trade_type === 'buy' ? 'pos' : 'neg'}">${t.trade_type}</td>
         <td class="num">${fmtQty(t.quantity)}</td>
@@ -2733,11 +2733,11 @@ async function loadCorporateActions() {
   for (const ca of rows) {
     tbody.innerHTML += `
       <tr data-id="${ca.id}">
-        <td><strong>${ca.symbol}</strong></td>
+        <td><strong>${escapeHtml(ca.symbol)}</strong></td>
         <td>${ca.action_type}</td>
         <td>${ca.ex_date}</td>
         <td class="num">${fmtCA(ca)}</td>
-        <td class="muted">${ca.notes || ""}</td>
+        <td class="muted">${escapeHtml(ca.notes || "")}</td>
         <td class="muted">${ca.source}</td>
         <td>
           <button class="edit-btn ca-edit-btn" data-id="${ca.id}">edit</button>

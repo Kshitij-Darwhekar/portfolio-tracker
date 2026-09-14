@@ -19,6 +19,14 @@ Page breaks can split entries: the month code may appear at the start of the nex
 page when the label is at the bottom of the current page. Member ID lines
 (e.g. PYKRP00192140001148253) and "Page N of M" lines appear between pages.
 
+A newer "Member Passbook" template (seen from 2026 onward) adds a Wages column
+and reorders the 5 numbers after "Cont. for Due-Month" to:
+  wages, reserved (always 0), employee contribution, employer contribution, pension
+instead of the older employee/employer/emp-withdrawal/employer-withdrawal/pension
+order. Detected via a "Wages" column header; the CR/DR line just above the
+"Cont. for Due-Month" label distinguishes a contribution (CR) from a withdrawal
+(DR) row, since the new template has no separate withdrawal columns per row.
+
 PII never stored: UAN, Member ID, Name, establishment details are skipped.
 """
 
@@ -45,6 +53,7 @@ _SINGLE_NUM = re.compile(r"^\d[\d,]*$")
 _FIVE_INLINE= re.compile(r"(\d[\d,]*)\s+(\d[\d,]*)\s+(\d[\d,]*)\s+(\d[\d,]*)\s+(\d[\d,]*)")
 _PAGE_ART   = re.compile(r"Page\s+\d+\s+of\s+\d+", re.I)
 _MEMBER_ID  = re.compile(r"^[A-Z]{2}\w{4,}\d{6,}")  # PYKRP00192140001148253
+_WAGES_HEADER = re.compile(r"/\s*Wages\b", re.I)  # marks the newer 5-column template
 
 # PII lines to skip entirely (never logged or stored)
 _PII = [
@@ -164,6 +173,11 @@ def import_epf_passbook(db: Session, pdf_path: str) -> dict:
             all_lines.append(s)
     doc.close()
 
+    # Newer template: a "Wages" column header means the 5 numbers per
+    # contribution row are [wages, reserved, employee, employer, pension]
+    # rather than the older [employee, employer, emp_wd, empr_wd, pension].
+    new_format = any(_WAGES_HEADER.search(l) for l in all_lines[:80])
+
     entries: list[dict] = []
     inserted = skipped = 0
     errors: list[str] = []
@@ -217,16 +231,45 @@ def import_epf_passbook(db: Session, pdf_path: str) -> dict:
                     )
 
             if nums and mm and yyyy:
-                emp, empr, emp_wd, empr_wd, pension = nums
-                entries.append({
-                    "entry_type":          "contribution",
-                    "month":               date(int(yyyy), int(mm), 1),
-                    "employee_share":      emp,
-                    "employer_share":      empr,
-                    "pension_contrib":     pension,
-                    "employee_withdrawal": emp_wd,
-                    "employer_withdrawal": empr_wd,
-                })
+                month = date(int(yyyy), int(mm), 1)
+                if new_format:
+                    # [wages, reserved, employee, employer, pension] — wages/reserved
+                    # aren't stored (no matching column); no per-row withdrawal figures
+                    # exist in this template, so a CR/DR marker just above the label
+                    # decides whether these numbers are a contribution or a withdrawal.
+                    _wages, _reserved, emp, empr, pension = nums
+                    txn_type = all_lines[i - 1].strip().upper() if i > 0 else "CR"
+                    if txn_type == "DR":
+                        entries.append({
+                            "entry_type":          "contribution",
+                            "month":               month,
+                            "employee_share":      0.0,
+                            "employer_share":      0.0,
+                            "pension_contrib":     0.0,
+                            "employee_withdrawal": emp,
+                            "employer_withdrawal": empr,
+                        })
+                    else:
+                        entries.append({
+                            "entry_type":          "contribution",
+                            "month":               month,
+                            "employee_share":      emp,
+                            "employer_share":      empr,
+                            "pension_contrib":     pension,
+                            "employee_withdrawal": 0.0,
+                            "employer_withdrawal": 0.0,
+                        })
+                else:
+                    emp, empr, emp_wd, empr_wd, pension = nums
+                    entries.append({
+                        "entry_type":          "contribution",
+                        "month":               month,
+                        "employee_share":      emp,
+                        "employer_share":      empr,
+                        "pension_contrib":     pension,
+                        "employee_withdrawal": emp_wd,
+                        "employer_withdrawal": empr_wd,
+                    })
             i = next_i if nums else i + 1
             continue
 

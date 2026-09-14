@@ -227,6 +227,13 @@ def build_http_app():
     is set. Calling this also creates mcp.session_manager (accessed by main.py's lifespan)."""
     inner = mcp.streamable_http_app()
     token = os.environ.get("MCP_TOKEN", "").strip()
+    if not token:
+        import sys
+        print(
+            "WARNING: ENABLE_MCP=1 but MCP_TOKEN is empty — /mcp is running with NO "
+            "authentication. Set MCP_TOKEN in .env unless you're certain this is intentional.",
+            file=sys.stderr,
+        )
     return _BearerGuard(inner, token) if token else inner
 
 

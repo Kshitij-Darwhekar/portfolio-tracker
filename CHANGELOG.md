@@ -5,6 +5,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.10.1] — 2026-09-15
+
+### Security
+- **Removed a leaked MCP bearer token from git** — `.codex/config.toml` was tracked with a real
+  token (added in commit `e1d750a`). Rotated `MCP_TOKEN`, untracked the file, added
+  `.codex/config.toml.example` as a placeholder. The token never matched the deployed value, so
+  it granted no live access, but it should never have been committed.
+- **Stored XSS fixes** — corporate action `notes`/`symbol`, holdings `display_name`/`folio`,
+  transaction `symbol`, and FD `bank`/`account_no` are now passed through `escapeHtml()` before
+  being rendered via `innerHTML` in `app.js`. Previously a free-text note or an unusual
+  import-derived field could inject markup that executed for any viewer of that table.
+- **CSV formula-injection guard** on `/api/transactions.csv` — cells starting with `=`, `+`, `-`,
+  or `@` are now quote-prefixed so Excel/Sheets can't interpret them as formulas.
+- **Upload size cap** — the tradebook/EPF/CAS/global-equity import endpoints now reject files
+  over 20MB (`413`) instead of buffering the whole upload in memory unbounded.
+- **`/mcp` misconfiguration warning** — prints a loud stderr warning if `ENABLE_MCP=1` with an
+  empty `MCP_TOKEN`, instead of silently running the endpoint with no authentication.
+
+### Fixed
+- **EPF passbook import silently produced wrong numbers** — EPFO's newer "Member Passbook"
+  template (seen from 2026 onward) adds a Wages column and reorders the per-row contribution
+  fields to `[wages, reserved, employee, employer, pension]` instead of the older
+  `[employee, employer, emp_withdrawal, employer_withdrawal, pension]`. The parser
+  (`app/epf_importer.py`) now detects the new layout via the Wages header and a CR/DR marker.
+  Verified against a real passbook: imported totals now match the PDF's own "Total
+  Contributions for the year" line exactly, where before it would have stored the wages figure
+  as the employee contribution and miscategorised the real contributions as withdrawals.
+- **Missing `pymupdf` dependency** — `requirements.txt` never listed `pymupdf` (needed by both
+  the EPF and CAMS/KFintech CAS PDF importers), so a fresh install or Docker rebuild silently
+  failed all PDF imports with "PyMuPDF not installed."
+
+---
+
 ## [0.10.0] — 2026-06-16
 
 ### Added

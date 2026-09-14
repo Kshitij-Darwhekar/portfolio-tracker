@@ -208,7 +208,17 @@ lists can't load at all.
 
 When in doubt: "does this add a capability the user didn't have?" → MINOR; "does it fix/improve something that existed?" → PATCH.
 
-Current: **v0.10.0** — Read-only **MCP server** (`app/mcp_server.py`): 7 analytics tools
+Current: **v0.10.1** — Security-review hardening + EPF importer fix: removed a leaked MCP
+bearer token from git (`.codex/config.toml`, rotated; never matched the live deployed token);
+escaped XSS-vulnerable fields (corporate action notes/symbol, holdings name/folio, transaction
+symbol, FD bank/account) in `app.js`; 20MB upload cap on import endpoints; CSV-formula-injection
+guard on `/api/transactions.csv`; loud stderr warning if `/mcp` would run unauthenticated
+(`ENABLE_MCP=1` + empty `MCP_TOKEN`). Also fixes EPF passbook import: added the missing
+`pymupdf` dependency to `requirements.txt` (was silently absent, breaking EPF/CAS PDF import on
+any fresh install/rebuild); parser now handles EPFO's newer passbook template (adds a Wages
+column, reorders contribution fields) which previously imported silently-wrong contribution
+amounts — verified against a real passbook, totals now match the PDF's own summary exactly.
+Plus v0.10.0: Read-only **MCP server** (`app/mcp_server.py`): 7 analytics tools
 (`list_holdings`, `portfolio_summary`, `allocation_breakdown`, `xirr_analysis`,
 `realized_pnl`, `net_worth`, `data_quality`) for AI tools (Claude/ChatGPT/Gemini).
 Streamable HTTP mounted at `/mcp` (shares the app port) + stdio (`python -m app.mcp_server`).

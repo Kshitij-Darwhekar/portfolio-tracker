@@ -8,3 +8,4 @@ requests>=2.31
 scipy>=1.11
 python-multipart>=0.0.9
 mcp>=1.12          # read-only MCP server for AI tools (app/mcp_server.py); only used when ENABLE_MCP=1
+pymupdf>=1.24      # PDF text extraction for EPF passbook + CAMS/KFintech CAS import

@@ -223,6 +223,13 @@ def delete_transaction(txn_id: int, db: Session = Depends(get_session)):
     return {"ok": True}
 
 
+def _csv_safe(value: str) -> str:
+    """Neutralize CSV formula injection: prefix with a quote if the cell starts
+    with a character Excel/Sheets would interpret as a formula (=, +, -, @)."""
+    s = str(value)
+    return "'" + s if s and s[0] in "=+-@" else s
+
+
 @app.get("/api/transactions.csv")
 def export_csv(db: Session = Depends(get_session)):
     rows = db.execute(select(Transaction).order_by(Transaction.trade_date)).scalars().all()
@@ -234,8 +241,10 @@ def export_csv(db: Session = Depends(get_session)):
     ])
     for t in rows:
         w.writerow([
-            t.trade_date.isoformat(), t.symbol, t.isin or "", t.exchange or "", t.segment,
-            t.trade_type, t.quantity, t.price, t.fees, t.notes or "", t.source, t.trade_id or "",
+            t.trade_date.isoformat(), _csv_safe(t.symbol), _csv_safe(t.isin or ""),
+            _csv_safe(t.exchange or ""), t.segment,
+            t.trade_type, t.quantity, t.price, t.fees, _csv_safe(t.notes or ""),
+            t.source, _csv_safe(t.trade_id or ""),
         ])
     buf.seek(0)
     return StreamingResponse(
@@ -247,9 +256,18 @@ def export_csv(db: Session = Depends(get_session)):
 
 # --- import ---
 
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB — generous for CAS/tradebook files, caps memory/CPU use on the Pi
+
+
+def _check_upload_size(content: bytes) -> None:
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"File too large (max {MAX_UPLOAD_BYTES // (1024 * 1024)}MB)")
+
+
 @app.post("/api/import")
 async def import_file(file: UploadFile = File(...), db: Session = Depends(get_session)):
     content = await file.read()
+    _check_upload_size(content)
     result = import_tradebook(db, file.filename or "upload.csv", content)
     return JSONResponse(result)
 
@@ -300,6 +318,7 @@ async def import_epf(file: UploadFile = File(...), db: Session = Depends(get_ses
     The PDF must be unlocked (save a password-free copy if needed).
     """
     content = await file.read()
+    _check_upload_size(content)
     import tempfile, os
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(content)
@@ -387,6 +406,7 @@ async def import_cas(file: UploadFile = File(...), db: Session = Depends(get_ses
     open it in a PDF viewer and save a copy without a password first.
     """
     content = await file.read()
+    _check_upload_size(content)
     # Write to a temp file since PyMuPDF needs a file path
     import tempfile, os
     suffix = ".pdf"
@@ -676,6 +696,7 @@ async def import_global_equity(file: UploadFile = File(...),
     """Import INDMoney Global Equity XLS/XLSX order book."""
     import tempfile, os
     content = await file.read()
+    _check_upload_size(content)
     suffix = Path(file.filename or "upload.xls").suffix or ".xls"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(content)
