@@ -1,0 +1,5 @@
+[mcp_servers.portfolio]
+url = "http://localhost:8000/mcp"
+
+[mcp_servers.portfolio.http_headers]
+Authorization = "Bearer I6DB-TogPiWLDzlsguMc9PVqVNUlBdfafEiXQNI2vG8"
