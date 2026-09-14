@@ -20,7 +20,7 @@ Privacy posture (see also docs/mcp.md):
 Config (env):
   - MCP_TOKEN          — bearer token required on the HTTP transport (enforced in main.py).
   - MCP_ALLOWED_HOSTS  — comma-separated Host allowlist for DNS-rebinding protection.
-                         Add the Pi's address (e.g. "192.168.29.50:8000") or a Twingate
+                         Add the Pi's address (e.g. "<host>:8000") or a Twingate
                          hostname. Use "*" to disable host checking (fine for VPN + token).
                          localhost/127.0.0.1 are always allowed.
 """

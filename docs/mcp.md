@@ -40,7 +40,7 @@ ENABLE_MCP=1
 #   python -c "import secrets; print(secrets.token_urlsafe(32))"
 MCP_TOKEN=<paste-the-secret>
 # the address you reach the app on (so DNS-rebinding protection allows it):
-MCP_ALLOWED_HOSTS=192.168.29.50:8000        # or a Twingate hostname, or "*" to disable the check
+MCP_ALLOWED_HOSTS=<host>:8000        # or a Twingate hostname, or "*" to disable the check
 ```
 
 Then restart (`docker compose up -d` on the Pi, or restart uvicorn locally). The endpoint is
@@ -55,12 +55,12 @@ Then restart (`docker compose up -d` on the Pi, or restart uvicorn locally). The
 
 ### Claude Code
 ```bash
-claude mcp add portfolio --transport http http://192.168.29.50:8000/mcp \
+claude mcp add portfolio --transport http http://<host>:8000/mcp \
   --header "Authorization: Bearer <MCP_TOKEN>"
 ```
 
 ### Claude Desktop
-- **Remote:** Settings → Connectors → *Add custom connector* → URL `http://192.168.29.50:8000/mcp`.
+- **Remote:** Settings → Connectors → *Add custom connector* → URL `http://<host>:8000/mcp`.
 - **Local (stdio)** — edit `claude_desktop_config.json` (Settings → Developer → Edit config). No
   token needed; it reads the live DB directly on the same machine:
   ```json
@@ -86,7 +86,7 @@ Pi**. See *Reachability* below.
 Gemini CLI — `gemini mcp add portfolio --transport http http://<host>:8000/mcp --header "Authorization: Bearer <MCP_TOKEN>"`, or add to `~/.gemini/settings.json`:
 ```json
 { "mcpServers": { "portfolio": {
-  "httpUrl": "http://192.168.29.50:8000/mcp",
+  "httpUrl": "http://<host>:8000/mcp",
   "headers": { "Authorization": "Bearer <MCP_TOKEN>" }
 } } }
 ```
@@ -98,7 +98,7 @@ Gemini CLI — `gemini mcp add portfolio --transport http http://<host>:8000/mcp
 A client can only use the server if it can **reach the host**:
 
 - **Local clients on the VPN** (Claude Desktop/Code, Gemini CLI, Cursor on a Twingate-connected
-  device) → reach `http://192.168.29.50:8000/mcp` directly. ✅ This is the safe, recommended path.
+  device) → reach `http://<host>:8000/mcp` directly. ✅ This is the safe, recommended path.
 - **Cloud web apps** (chatgpt.com, gemini.google.com) run on the provider's servers and **cannot
   reach** a Twingate-only Pi. To use those you'd have to **expose the endpoint publicly** —
   e.g. a Cloudflare Tunnel or a Caddy reverse proxy with HTTPS, still requiring `MCP_TOKEN`. That
